@@ -227,6 +227,94 @@ fn file_names_are_strings_or_run_to_the_next_space() {
     assert_eq!(problems("include"), ["7..7 expected a file name"]);
 }
 
+/// The diagnostics of `text` as `start..end kind message`, read with
+/// `macros` already defined.
+fn problems_knowing(text: &str, macros: &[&str]) -> Vec<String> {
+    parse_with_macros(text, Profile::PASMONEXT_0_1_3, macros.iter().copied())
+        .expect("short text always parses")
+        .diagnostics()
+        .iter()
+        .map(|d| format!("{} {:?} {}", d.range(), d.kind(), d.message()))
+        .collect()
+}
+
+fn lines_knowing(text: &str, macros: &[&str]) -> Vec<String> {
+    parse_with_macros(text, Profile::PASMONEXT_0_1_3, macros.iter().copied())
+        .expect("short text always parses")
+        .tree()
+        .root()
+        .children()
+        .filter_map(|c| c.into_node())
+        .map(|l| render(&l))
+        .collect()
+}
+
+#[test]
+fn a_macro_from_an_include_is_a_call_once_the_parser_knows_it() {
+    // PasmoNext 0.1.3 assembles both lines when macros.asm defines `border`
+    // and `clear_screen`.
+    let text = " include \"macros.asm\"\nborder white\nclear_screen\n";
+    assert_eq!(
+        lines_knowing(text, &["border", "clear_screen"])[1..],
+        [
+            "(LINE (MACRO_CALL border (MACRO_ARG white)) NL)",
+            "(LINE (MACRO_CALL clear_screen) NL)",
+        ]
+    );
+    assert!(problems_knowing(text, &["border", "clear_screen"]).is_empty());
+}
+
+#[test]
+fn after_an_include_an_unknown_first_word_is_reported_not_guessed() {
+    let text = " include \"macros.asm\"\nborder white\nclear_screen\n";
+    assert_eq!(
+        lines_knowing(text, &[])[1..],
+        [
+            "(LINE (LABEL border) (MACRO_CALL white) NL)",
+            "(LINE (LABEL clear_screen) NL)",
+        ]
+    );
+    assert_eq!(
+        problems_knowing(text, &[]),
+        [
+            "22..28 Unknown `border` is read as a label, but if an included file defines it as a macro, this line calls it",
+            "35..47 Unknown `clear_screen` is read as a label, but if an included file defines it as a macro, this line calls it",
+        ]
+    );
+}
+
+#[test]
+fn only_lines_that_would_read_differently_are_reported() {
+    let after = |line: &str| problems_knowing(&format!(" include \"m.asm\"\n{line}\n"), &["known"]);
+    // A colon makes a label certain, and a keyword or known macro after the
+    // name makes the line a label and that statement either way.
+    for line in [
+        "here: ",
+        "here: other",
+        "here nop",
+        "here known",
+        "here equ 1",
+        "here macro",
+    ] {
+        assert!(after(line).is_empty(), "{line}");
+    }
+    // A number after the name can only be a call's argument.
+    assert!(after("other 5").is_empty());
+    // Before any include, PasmoNext's single pass makes the word a label.
+    assert!(problems_knowing("clear_screen\nborder white\n include \"m.asm\"\n", &[]).is_empty());
+    // INCBIN brings in bytes, not macros.
+    assert!(problems_knowing(" incbin \"tiles.bin\"\nclear_screen\n", &[]).is_empty());
+}
+
+#[test]
+fn known_macro_names_are_case_sensitive() {
+    // PasmoNext rejects `BORDER 1` when the macro is `border`.
+    assert_eq!(
+        lines_knowing("BORDER white\n", &["border"]),
+        ["(LINE (LABEL BORDER) (MACRO_CALL white) NL)"]
+    );
+}
+
 #[test]
 fn a_question_mark_touching_a_name_character_starts_a_name() {
     // PasmoNext reads `1?2:3` as `1` then the name `?2`, and rejects it.

@@ -26,5 +26,5 @@ mod parser;
 mod profile;
 
 pub use lexer::{Lexed, Token, lex};
-pub use parser::{ParseError, parse};
+pub use parser::{ParseError, parse, parse_with_macros};
 pub use profile::Profile;
