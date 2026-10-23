@@ -1,6 +1,6 @@
 # Plan: the Z80 family parser with a PasmoNext profile
 
-**Status:** Agreed 2026-10-23. Steps 1 to 4 are done.
+**Status:** Agreed 2026-10-23. Steps 1 to 4 are done; step 5's design is agreed.
 **Binding records:** Lang198x's
 [shared syntax layer decision](https://github.com/lang198x/lang198x/blob/main/decisions/shared-syntax-layer.md)
 and 198x's
@@ -248,13 +248,67 @@ from `lang198x-syntax` 0.1.2, already released.
 
 ### 5. Lowering, behind the `ir` feature
 
-- **Files:** `crates/z80-asm/src/lower.rs`; `asm198x-ir` as an optional
-  dependency.
-- **What:** typed views and expansions lowered to `asm198x-ir` statements,
-  with spans and diagnostics carried across.
-- **Verified by:** unit tests with the feature on. CI builds and tests both
-  with and without `ir`, and checks that the default build has no
-  `asm198x-ir` in `cargo tree`, so the separation cannot quietly erode.
+Design agreed 2026-10-23.
+
+- **The authority is PasmoNext 0.1.3, not Asm198x's current reader.** 198x's
+  assembly source layer decision now says so for every migration gate.
+  Lowering produces IR that assembles to PasmoNext's bytes. Where Asm198x
+  0.0.72's `pasmo` dialect differs, the difference is filed against Asm198x
+  and not copied: asm198x#957 (expressions and escapes), #959 (`DEFL`), #960
+  (`$` in conditions) and #961 (macros from an included file).
+- **Dependencies:** `asm198x-ir ^0.0.72` and `isa198x ^0.1.7`, both optional,
+  both behind `ir`. `isa198x` is needed directly to choose an instruction's
+  form, and `asm198x-ir`'s statements name its types.
+- **The CPU is a lowering option,** not part of the profile: `Cpu::Z80` uses
+  `isa198x`'s Z80 set, and `Cpu::Z80N` adds its Next extension. Asm198x's
+  `pasmo` and `pasmonext` are the same profile with the two CPUs.
+- **Pieces, one module each:**
+  - **Expressions:** a view `Expr` becomes an IR `Expr` with PasmoNext's
+    meaning: 16-bit words, `0xFFFF` for true, and the operators the profile
+    parses (`MOD`, `HIGH`, `LOW`, `?:`, `DEFINED`, `NUL`, `??`).
+  - **Instructions:** a mnemonic and its operand views become an `isa198x`
+    form. Each operand offers the form labels it could fill, tried in order.
+    `RST`, `IM` and the bit number of `BIT`, `RES` and `SET` are folded into
+    the label. An `(IX+d)` displacement is a signed byte.
+  - **Directives:** each one the curriculum or the `pasmo` and `pasmonext`
+    verdict corpus uses becomes its IR operation: `ORG`, `EQU`, `DEFL`, the
+    data directives, `DS`, `INCBIN`, `END` and the Next directives in use.
+    Any other directive is reported as not lowered yet, by name, rather than
+    guessed.
+  - **The layout host:** `Layout` implements the expander's `Host`. It lowers
+    each line as the expander hands it over and keeps PasmoNext's first-pass
+    view: the address, advanced by `asm198x-ir`'s own `next_pc` so sizes have
+    one source, and the symbols so far (labels, `EQU`, and `DEFL`, which may
+    change). `IF` conditions and `REPT` counts are evaluated with
+    `asm198x-ir`'s `Expr::eval` against that view. A name defined further on
+    is an error, as in PasmoNext.
+  - **Spans:** each statement's file, line and operand position come from
+    tracing its provenance to the text a person wrote. Its expansion frames
+    come from the call sites around it, innermost first.
+  - **The entry point:** `lower(program, profile, cpu, binaries)`, where
+    `binaries` loads `INCBIN` files. It returns the statements, the
+    diagnostics and the provenance.
+- **Verified by:**
+  - **Expressions:** all 107 expressions measured on PasmoNext, lowered and
+    evaluated by `asm198x-ir`, give PasmoNext's values.
+  - **Instructions and directives:** unit tests of the form each one chooses,
+    including every `isa198x` Z80 form and the Next forms.
+  - **Checked outside the tests,** since Asm198x has no public API that
+    assembles a statement stream:
+    - **Layout:** `Layout`'s symbols match the symbol table PasmoNext writes
+      (its third argument) for all 391 curriculum programs.
+    - **Bytes:** a throwaway encoder in a scratch folder turns the statements
+      into bytes with `isa198x`'s forms, compared with PasmoNext's output for
+      the same programs. It is not committed: the byte gate belongs to Asm198x
+      in step 6, and Lang198x owns no assembler.
+  - **CI:** Clippy, tests and coverage run with all features, through the
+    shared workflow's `all-features` input. A job checks that the default
+    build's `cargo tree` has no `asm198x-ir` or `isa198x`, so the separation
+    cannot quietly erode.
+  - **Mutations and fuzzing:** a deliberate break per rule, and a `lower` fuzz
+    target.
+- **Pull requests:** 5a, the feature, CI and expressions; 5b, instructions;
+  5c, directives, the layout host, spans and the entry point.
 
 ### 6. The gate, in Asm198x
 
