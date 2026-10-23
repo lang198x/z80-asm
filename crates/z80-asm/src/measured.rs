@@ -97,6 +97,20 @@ pub(crate) const EXPRESSIONS: &[(&str, u16)] = &[
     ("DEFINED bar", 0),
     ("DEFINED foo + 1", 0),
     ("DEFINED foo AND 1", 1),
+    ("nul", 0xFFFF),
+    ("NUL", 0xFFFF),
+    ("nul 5", 0),
+    ("nul 0", 0),
+    ("1 + nul 5", 1),
+    ("1 + nul", 0),
+    ("nul 5 + 1", 0),
+    ("nul nul", 0),
+    ("nul ; c", 0xFFFF),
+    ("2 * nul", 0xFFFE),
+    ("nul ? 3 : 4", 0),
+    ("nul ,7", 0),
+    ("NOT nul", 0),
+    ("- nul", 1),
 ];
 
 /// Expressions PasmoNext 0.1.3 rejects. Each puts a prefix operator where a
@@ -113,4 +127,6 @@ pub(crate) const REJECTED: &[&str] = &[
     "2 = HIGH 300h",
     "NOT 0 = NOT 0",
     "DEFINED (foo)",
+    "(nul)",
+    "(nul 5)",
 ];

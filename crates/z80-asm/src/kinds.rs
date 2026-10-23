@@ -138,6 +138,9 @@ kinds! {
     COND_EXPR,
     /// `DEFINED name`, which asks whether a name has been defined.
     DEFINED_EXPR,
+    /// `NUL` and everything after it on the line, which asks whether there
+    /// is nothing after it. Used to test for a missing macro argument.
+    NUL_EXPR,
 }
 
 /// Returns the name of a Z80 kind, such as `"IDENT"`, for tree dumps. Shared
@@ -158,9 +161,9 @@ mod tests {
         assert_eq!(name(IDENT), Some("IDENT"));
         assert_eq!(name(PIPE_PIPE), Some("PIPE_PIPE"));
         assert_eq!(name(SOURCE_FILE), Some("SOURCE_FILE"));
-        assert_eq!(name(DEFINED_EXPR), Some("DEFINED_EXPR"));
+        assert_eq!(name(NUL_EXPR), Some("NUL_EXPR"));
         assert_eq!(
-            usize::from(DEFINED_EXPR.get() - IDENT.get()) + 1,
+            usize::from(NUL_EXPR.get() - IDENT.get()) + 1,
             NAMES.len(),
             "the last kind is numbered one below the table's length"
         );

@@ -31,7 +31,9 @@ mod line;
 mod operand;
 mod statement;
 
-pub use expr::{BinExpr, CondExpr, DefinedExpr, Expr, Literal, NameRef, ParenExpr, UnaryExpr};
+pub use expr::{
+    BinExpr, CondExpr, DefinedExpr, Expr, Literal, NameRef, NulExpr, ParenExpr, UnaryExpr,
+};
 pub use line::{Label, Line, SourceFile};
 pub use operand::{Index, Indirect, Operand};
 pub use statement::{Directive, FileName, Instruction, MacroArg, MacroCall, Statement, Text};

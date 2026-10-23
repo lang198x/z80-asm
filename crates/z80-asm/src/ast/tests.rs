@@ -140,6 +140,7 @@ fn every_expression_kind_wraps_its_own_node() {
         ("1+1", kinds::BIN_EXPR),
         ("1 ? 2:3", kinds::COND_EXPR),
         ("DEFINED x", kinds::DEFINED_EXPR),
+        ("NUL", kinds::NUL_EXPR),
     ] {
         assert_eq!(expr(source).syntax().kind(), kind, "{source}");
     }
@@ -274,6 +275,7 @@ fn eval(expr: &Expr) -> Option<u32> {
         }
         Expr::Name(name) => (name.token()?.text() == "foo").then_some(1)?,
         Expr::Defined(defined) => truth(defined.name()?.token()?.text() == "foo"),
+        Expr::Nul(nul) => truth(!nul.has_rest()),
         Expr::Paren(paren) => eval(&paren.expr()?)?,
         Expr::Conditional(cond) => {
             if eval(&cond.condition()?)? != 0 {
