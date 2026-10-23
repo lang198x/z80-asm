@@ -28,8 +28,12 @@ artifacts and the verdict corpus belong to Asm198x.
 - **A dialect joins only on its verdicts.** It is supported once the full path
   matches the reference tool's recorded verdicts, including rejections. The
   byte gate runs in Asm198x against a pinned pair of versions.
-- **Profiles name the tool version they describe.** The first is PasmoNext
-  0.1.3, not Julian Albo's Pasmo 0.5.x.
+- **Profiles name the tool version they describe,** and so does everything
+  written about them. The first is PasmoNext 0.1.3, C Kirby's fork. "Pasmo"
+  means only Julian Albo's original, which has no profile yet. Asm198x's
+  dialect names appear as code: its `pasmo` is PasmoNext 0.1.3 for a plain
+  Z80, and its `pasmonext` is the same tool targeting the Z80N. A CPU target
+  is never part of a dialect's name.
 - **Lowering to `asm198x-ir` sits behind the optional `ir` feature, off by
   default.** The parser, preprocessing, typed views and profiles must build
   without any Asm198x crate, so tools that need only the tree stay

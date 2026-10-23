@@ -23,7 +23,8 @@ pub struct Profile {
 impl Profile {
     /// PasmoNext 0.1.3, C Kirby's fork of Julian Albo's Pasmo with the ZX
     /// Spectrum Next's extra instructions. The 198x curriculum builds with it,
-    /// and Asm198x's Pasmo verdicts were recorded with it.
+    /// and Asm198x's verdicts for its `pasmo` and `pasmonext` dialects were
+    /// recorded with it.
     pub const PASMONEXT_0_1_3: Self = Self {
         id: "pasmonext-0.1.3",
         tool: "PasmoNext",
