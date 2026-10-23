@@ -2,6 +2,10 @@
 
 use std::fmt;
 
+use lang198x_syntax::SyntaxKind;
+
+use crate::kinds;
+
 /// One Z80 assembler dialect, as a particular version of its reference tool
 /// accepts it.
 ///
@@ -24,6 +28,7 @@ pub struct Profile {
     tool: &'static str,
     version: &'static str,
     pub(crate) lexical: Lexical,
+    pub(crate) grammar: Grammar,
 }
 
 /// How a dialect splits text into tokens.
@@ -57,6 +62,171 @@ pub(crate) struct Lexical {
     /// Whether a backslash starts an escape inside double-quoted strings.
     pub(crate) double_quote_escapes: bool,
 }
+
+/// How a dialect arranges tokens into lines, statements and expressions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct Grammar {
+    /// Instruction mnemonics, in lower case. Matching ignores case.
+    pub(crate) mnemonics: &'static [&'static str],
+    /// Directives, in upper case. Matching ignores case.
+    pub(crate) directives: &'static [Directive],
+    /// Expression operators, from the loosest-binding level to the tightest.
+    /// A conditional `? :`, if the dialect has one, sits below them all.
+    pub(crate) levels: &'static [Level],
+    /// Whether the dialect has `condition ? then : else`.
+    pub(crate) conditional: bool,
+    /// The word that asks whether a name is defined, such as `DEFINED`.
+    pub(crate) defined: Option<&'static str>,
+    /// Registers that take a signed displacement inside parentheses, such as
+    /// `ix` in `(ix+5)`. Matching ignores case.
+    pub(crate) index_registers: &'static [&'static str],
+}
+
+/// A directive and the shape of its operands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct Directive {
+    pub(crate) name: &'static str,
+    pub(crate) operands: Operands,
+}
+
+/// The shape of a directive's operands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Operands {
+    /// Expressions separated by commas, or none.
+    Expressions,
+    /// A file name, such as `INCLUDE`'s: a string, or the text up to the
+    /// next space.
+    FileName,
+    /// Free text to the end of the line, comments included, such as
+    /// `.ERROR`'s message.
+    Text,
+    /// Expressions, where the first names a new macro. The keyword-first
+    /// form, `MACRO name, params`.
+    MacroHeader,
+}
+
+/// One level of expression operators.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Level {
+    /// Operators between two operands, grouped from the left.
+    Binary(&'static [Operator]),
+    /// Operators before one operand. They can be repeated, as in `- -5`, and
+    /// their operand is the next level, so `-1 + 2` can mean `-(1 + 2)`.
+    Unary(&'static [Operator]),
+}
+
+/// An operator, written as a symbol or as a word.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Operator {
+    /// A symbol token, such as `+`.
+    Symbol(SyntaxKind),
+    /// A word, matched ignoring case, such as `AND`.
+    Word(&'static str),
+}
+
+use Operator::{Symbol, Word};
+
+/// PasmoNext 0.1.3's expression levels, measured by evaluating expressions
+/// whose result depends on which operator binds tighter. From loosest to
+/// tightest: `||`; `&&`; `|`, `OR` and `XOR` together; `&` and `AND`; the
+/// prefix operators; comparisons; `+` and `-`; then `*`, `/`, `MOD`, `%` and
+/// the shifts together. Two consequences surprise most readers: `1 << 2 + 1`
+/// is 5, and `-1 + 2` is `-(1 + 2)`. A prefix operator cannot follow a tighter
+/// operator at all, so `2 * -3` is rejected.
+const PASMONEXT_LEVELS: &[Level] = &[
+    Level::Binary(&[Symbol(kinds::PIPE_PIPE)]),
+    Level::Binary(&[Symbol(kinds::AMP_AMP)]),
+    Level::Binary(&[Symbol(kinds::PIPE), Word("OR"), Word("XOR")]),
+    Level::Binary(&[Symbol(kinds::AMP), Word("AND")]),
+    Level::Unary(&[
+        Symbol(kinds::MINUS),
+        Symbol(kinds::PLUS),
+        Symbol(kinds::BANG),
+        Symbol(kinds::TILDE),
+        Word("NOT"),
+        Word("HIGH"),
+        Word("LOW"),
+    ]),
+    Level::Binary(&[
+        Symbol(kinds::EQ),
+        Symbol(kinds::NE),
+        Symbol(kinds::LT),
+        Symbol(kinds::GT),
+        Symbol(kinds::LE),
+        Symbol(kinds::GE),
+        Word("EQ"),
+        Word("NE"),
+        Word("LT"),
+        Word("GT"),
+        Word("LE"),
+        Word("GE"),
+    ]),
+    Level::Binary(&[Symbol(kinds::PLUS), Symbol(kinds::MINUS)]),
+    Level::Binary(&[
+        Symbol(kinds::STAR),
+        Symbol(kinds::SLASH),
+        Symbol(kinds::PERCENT),
+        Symbol(kinds::SHL),
+        Symbol(kinds::SHR),
+        Word("MOD"),
+        Word("SHL"),
+        Word("SHR"),
+    ]),
+];
+
+/// The mnemonics PasmoNext 0.1.3 recognises: the Z80's, its undocumented
+/// `sll`, and the Spectrum Next's Z80N additions. Which of them a target CPU
+/// allows is checked later; the parser needs only to know they are
+/// instructions, so that they are never read as labels.
+const PASMONEXT_MNEMONICS: &[&str] = &[
+    "adc", "add", "and", "bit", "call", "ccf", "cp", "cpd", "cpdr", "cpi", "cpir", "cpl", "daa",
+    "dec", "di", "djnz", "ei", "ex", "exx", "halt", "im", "in", "inc", "ind", "indr", "ini",
+    "inir", "jp", "jr", "ld", "ldd", "lddr", "ldi", "ldir", "neg", "nop", "or", "otdr", "otir",
+    "out", "outd", "outi", "pop", "push", "res", "ret", "reti", "retn", "rl", "rla", "rlc", "rlca",
+    "rld", "rr", "rra", "rrc", "rrca", "rrd", "rst", "sbc", "scf", "set", "sla", "sll", "sra",
+    "srl", "sub", "xor", // Z80N.
+    "brlc", "bsla", "bsra", "bsrf", "bsrl", "ldirx", "ldix", "lddrx", "lddx", "ldpirx", "ldws",
+    "mirror", "mul", "nextreg", "outinb", "pixelad", "pixeldn", "setae", "swapnib", "test",
+];
+
+const fn directive(name: &'static str, operands: Operands) -> Directive {
+    Directive { name, operands }
+}
+
+/// The directives PasmoNext 0.1.3 recognises. `DM`, `IFDEF`, `DEFINE`,
+/// `PHASE` and the dotted spellings of ordinary directives, such as `.ORG`,
+/// are not among them.
+const PASMONEXT_DIRECTIVES: &[Directive] = &[
+    directive("ORG", Operands::Expressions),
+    directive("EQU", Operands::Expressions),
+    directive("DEFL", Operands::Expressions),
+    directive("DEFB", Operands::Expressions),
+    directive("DB", Operands::Expressions),
+    directive("DEFM", Operands::Expressions),
+    directive("DEFW", Operands::Expressions),
+    directive("DW", Operands::Expressions),
+    directive("DEFS", Operands::Expressions),
+    directive("DS", Operands::Expressions),
+    directive("ALIGN", Operands::Expressions),
+    directive("INCLUDE", Operands::FileName),
+    directive("INCBIN", Operands::FileName),
+    directive("IF", Operands::Expressions),
+    directive("ELSE", Operands::Expressions),
+    directive("ENDIF", Operands::Expressions),
+    directive("MACRO", Operands::MacroHeader),
+    directive("ENDM", Operands::Expressions),
+    directive("EXITM", Operands::Expressions),
+    directive(".SHIFT", Operands::Expressions),
+    directive("REPT", Operands::Expressions),
+    directive("IRP", Operands::Expressions),
+    directive("LOCAL", Operands::Expressions),
+    directive("PROC", Operands::Expressions),
+    directive("ENDP", Operands::Expressions),
+    directive("PUBLIC", Operands::Expressions),
+    directive("END", Operands::Expressions),
+    directive(".ERROR", Operands::Text),
+    directive(".WARNING", Operands::Text),
+];
 
 impl Profile {
     /// PasmoNext 0.1.3, C Kirby's fork of Julian Albo's Pasmo with the ZX
@@ -93,6 +263,14 @@ impl Profile {
             current_address: Some('$'),
             primed_registers: &["af"],
             double_quote_escapes: true,
+        },
+        grammar: Grammar {
+            mnemonics: PASMONEXT_MNEMONICS,
+            directives: PASMONEXT_DIRECTIVES,
+            levels: PASMONEXT_LEVELS,
+            conditional: true,
+            defined: Some("DEFINED"),
+            index_registers: &["ix", "iy"],
         },
     };
 

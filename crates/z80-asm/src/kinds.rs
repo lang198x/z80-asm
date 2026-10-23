@@ -12,107 +12,139 @@ const fn kind(offset: u16) -> SyntaxKind {
     }
 }
 
-/// The whole source file. Every tree has one, at its root.
-pub const SOURCE_FILE: SyntaxKind = kind(0);
+/// Declares each kind as a constant, numbered in order, and the table of
+/// their names, so a kind and its name can never drift apart.
+macro_rules! kinds {
+    ($($(#[$doc:meta])* $name:ident,)*) => {
+        kinds!(@number 0u16; $($(#[$doc])* $name,)*);
 
-/// A name: a label, a symbol, a mnemonic, a register or a directive. Which one
-/// is decided by the parser, not the lexer.
-pub const IDENT: SyntaxKind = kind(1);
-/// A number in any of the profile's formats, such as `42`, `$2A`, `2Ah` or
-/// `%101010`. An invalid one, such as `12G`, is still a number token, with a
-/// diagnostic.
-pub const NUMBER: SyntaxKind = kind(2);
-/// A quoted string or character, with its quotes.
-pub const STRING: SyntaxKind = kind(3);
-/// `$` on its own: the address of the current instruction.
-pub const DOLLAR: SyntaxKind = kind(4);
+        const NAMES: &[&str] = &[$(stringify!($name),)*];
+    };
+    (@number $n:expr; $(#[$doc:meta])* $name:ident, $($rest:tt)*) => {
+        $(#[$doc])*
+        pub const $name: SyntaxKind = kind($n);
+        kinds!(@number $n + 1; $($rest)*);
+    };
+    (@number $n:expr;) => {};
+}
 
-/// `,`
-pub const COMMA: SyntaxKind = kind(5);
-/// `:`
-pub const COLON: SyntaxKind = kind(6);
-/// `(`
-pub const L_PAREN: SyntaxKind = kind(7);
-/// `)`
-pub const R_PAREN: SyntaxKind = kind(8);
-/// `+`
-pub const PLUS: SyntaxKind = kind(9);
-/// `-`
-pub const MINUS: SyntaxKind = kind(10);
-/// `*`
-pub const STAR: SyntaxKind = kind(11);
-/// `/`
-pub const SLASH: SyntaxKind = kind(12);
-/// `%`, the remainder operator. `%` followed by binary digits is a number.
-pub const PERCENT: SyntaxKind = kind(13);
-/// `&`, bitwise and. `&` followed by hexadecimal digits is a number.
-pub const AMP: SyntaxKind = kind(14);
-/// `|`
-pub const PIPE: SyntaxKind = kind(15);
-/// `!`
-pub const BANG: SyntaxKind = kind(16);
-/// `~`
-pub const TILDE: SyntaxKind = kind(17);
-/// `?`, in a conditional expression. `?` followed by a name character starts
-/// a name instead.
-pub const QUESTION: SyntaxKind = kind(18);
-/// `=`, which compares for equality.
-pub const EQ: SyntaxKind = kind(19);
-/// `!=`
-pub const NE: SyntaxKind = kind(20);
-/// `<`
-pub const LT: SyntaxKind = kind(21);
-/// `>`
-pub const GT: SyntaxKind = kind(22);
-/// `<=`
-pub const LE: SyntaxKind = kind(23);
-/// `>=`
-pub const GE: SyntaxKind = kind(24);
-/// `<<`
-pub const SHL: SyntaxKind = kind(25);
-/// `>>`
-pub const SHR: SyntaxKind = kind(26);
-/// `&&`
-pub const AMP_AMP: SyntaxKind = kind(27);
-/// `||`
-pub const PIPE_PIPE: SyntaxKind = kind(28);
+kinds! {
+    // Tokens.
+
+    /// A name: a label, a symbol, a mnemonic, a register or a directive.
+    /// Which one is decided by the parser, not the lexer.
+    IDENT,
+    /// A number in any of the profile's formats, such as `42`, `$2A`, `2Ah`
+    /// or `%101010`. An invalid one, such as `12G`, is still a number token,
+    /// with a diagnostic.
+    NUMBER,
+    /// A quoted string or character, with its quotes.
+    STRING,
+    /// `$` on its own: the address of the current instruction.
+    DOLLAR,
+    /// `,`
+    COMMA,
+    /// `:`
+    COLON,
+    /// `(`
+    L_PAREN,
+    /// `)`
+    R_PAREN,
+    /// `+`
+    PLUS,
+    /// `-`
+    MINUS,
+    /// `*`
+    STAR,
+    /// `/`
+    SLASH,
+    /// `%`, the remainder operator. `%` followed by binary digits is a
+    /// number.
+    PERCENT,
+    /// `&`, bitwise and. `&` followed by hexadecimal digits is a number.
+    AMP,
+    /// `|`
+    PIPE,
+    /// `!`
+    BANG,
+    /// `~`
+    TILDE,
+    /// `?`, in a conditional expression. `?` followed by a name character
+    /// starts a name instead.
+    QUESTION,
+    /// `=`, which compares for equality.
+    EQ,
+    /// `!=`
+    NE,
+    /// `<`
+    LT,
+    /// `>`
+    GT,
+    /// `<=`
+    LE,
+    /// `>=`
+    GE,
+    /// `<<`
+    SHL,
+    /// `>>`
+    SHR,
+    /// `&&`
+    AMP_AMP,
+    /// `||`
+    PIPE_PIPE,
+
+    // Nodes.
+
+    /// The whole source file. Every tree has one, at its root.
+    SOURCE_FILE,
+    /// One line of source, with its line ending if it has one.
+    LINE,
+    /// A label at the start of a line, with its colon if it has one.
+    LABEL,
+    /// A Z80 instruction: its mnemonic and operands.
+    INSTRUCTION,
+    /// A directive, such as `ORG` or `DEFB`, and its operands.
+    DIRECTIVE,
+    /// A use of a macro: its name and arguments.
+    MACRO_CALL,
+    /// One operand of an instruction or directive.
+    OPERAND,
+    /// An instruction operand in parentheses, such as `(hl)` or `(1234h)`:
+    /// a memory address or port rather than a value. Nothing may follow its
+    /// closing parenthesis in the same operand.
+    INDIRECT,
+    /// An index register, a sign and a displacement inside an indirect
+    /// operand, such as `ix+5`. The sign applies to the whole displacement,
+    /// so `ix-1+3` means `ix-4`.
+    INDEX,
+    /// One macro argument, as written. Arguments are text, split at commas,
+    /// and are not parsed as expressions.
+    MACRO_ARG,
+    /// The file an `INCLUDE` or `INCBIN` names, quoted or not.
+    FILE_NAME,
+    /// The free text after a directive such as `.ERROR`.
+    TEXT,
+    /// A number, string or `$`.
+    LITERAL,
+    /// A use of a name, such as a label, symbol or register.
+    NAME_REF,
+    /// An expression in parentheses.
+    PAREN_EXPR,
+    /// A prefix operator and its operand, such as `-x` or `HIGH x`.
+    UNARY_EXPR,
+    /// Two operands and the operator between them.
+    BIN_EXPR,
+    /// `condition ? then : else`.
+    COND_EXPR,
+    /// `DEFINED name`, which asks whether a name has been defined.
+    DEFINED_EXPR,
+}
 
 /// Returns the name of a Z80 kind, such as `"IDENT"`, for tree dumps. Shared
 /// kinds are named by [`SyntaxKind::shared_name`], so this returns `None` for
 /// them.
 #[must_use]
 pub fn name(kind: SyntaxKind) -> Option<&'static str> {
-    const NAMES: [&str; 29] = [
-        "SOURCE_FILE",
-        "IDENT",
-        "NUMBER",
-        "STRING",
-        "DOLLAR",
-        "COMMA",
-        "COLON",
-        "L_PAREN",
-        "R_PAREN",
-        "PLUS",
-        "MINUS",
-        "STAR",
-        "SLASH",
-        "PERCENT",
-        "AMP",
-        "PIPE",
-        "BANG",
-        "TILDE",
-        "QUESTION",
-        "EQ",
-        "NE",
-        "LT",
-        "GT",
-        "LE",
-        "GE",
-        "SHL",
-        "SHR",
-        "AMP_AMP",
-        "PIPE_PIPE",
-    ];
     let offset = kind.get().checked_sub(SyntaxKind::FIRST_LANGUAGE)?;
     NAMES.get(usize::from(offset)).copied()
 }
@@ -122,45 +154,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_kind_has_its_own_name() {
-        let all = [
-            SOURCE_FILE,
-            IDENT,
-            NUMBER,
-            STRING,
-            DOLLAR,
-            COMMA,
-            COLON,
-            L_PAREN,
-            R_PAREN,
-            PLUS,
-            MINUS,
-            STAR,
-            SLASH,
-            PERCENT,
-            AMP,
-            PIPE,
-            BANG,
-            TILDE,
-            QUESTION,
-            EQ,
-            NE,
-            LT,
-            GT,
-            LE,
-            GE,
-            SHL,
-            SHR,
-            AMP_AMP,
-            PIPE_PIPE,
-        ];
-        let mut names: Vec<_> = all.iter().map(|&k| name(k)).collect();
-        assert!(names.iter().all(Option::is_some));
+    fn kinds_are_numbered_in_order_and_named() {
         assert_eq!(name(IDENT), Some("IDENT"));
         assert_eq!(name(PIPE_PIPE), Some("PIPE_PIPE"));
-        names.sort();
+        assert_eq!(name(SOURCE_FILE), Some("SOURCE_FILE"));
+        assert_eq!(name(DEFINED_EXPR), Some("DEFINED_EXPR"));
+        assert_eq!(
+            usize::from(DEFINED_EXPR.get() - IDENT.get()) + 1,
+            NAMES.len(),
+            "the last kind is numbered one below the table's length"
+        );
+        let mut names = NAMES.to_vec();
+        names.sort_unstable();
         names.dedup();
-        assert_eq!(names.len(), all.len(), "two kinds share a name");
+        assert_eq!(names.len(), NAMES.len(), "two kinds share a name");
     }
 
     #[test]
