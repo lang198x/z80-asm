@@ -1,0 +1,31 @@
+# lang198x-z80-asm — the Z80 assembler family for Lang198x.
+#
+# One hand-written parser for every Z80 dialect that shares its structure, with
+# a profile per dialect, lowering to asm198x-ir for the Asm198x back end. The
+# design is in Lang198x's shared syntax layer decision and the 198x decision
+# moving assembly source to Lang198x.
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+license = "GPL-2.0-or-later"
+repository = "https://github.com/lang198x/z80-asm"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+missing_docs = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+unwrap_used = "deny"
+
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
