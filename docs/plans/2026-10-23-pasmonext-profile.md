@@ -393,10 +393,12 @@ Design agreed 2026-10-23.
     files (`--public`, `--cspecsymbols`, `--err`, `--snasmerrors`).
   - **Still to build, in this order, each measured on PasmoNext first and
     with its IR operation checked; a gap in `asm198x-ir` is filed there:**
-    1. **The layout host, spans and the entry point,** with `ORG`, `EQU`,
-       `DEFL`, `DEFB`/`DB`/`DEFM`, `DEFW`/`DW`, `DEFS`/`DS`, `ALIGN`,
-       `INCBIN` and `END`, and the symbol rules (`setequorlabel`,
-       `setdefl`).
+    1. **The pass loop, the layout host, spans and the entry point,**
+       with `ORG`, `EQU`, `DEFL`, `DEFB`/`DB`/`DEFM`, `DEFW`/`DW`,
+       `DEFS`/`DS`, `ALIGN`, `INCBIN` and `END`, the symbol rules
+       (`setequorlabel`, `setdefl`) and `--pass3`. See *The pass loop*
+       below; earlier passes' leftover bytes follow in a pull request of
+       their own.
     2. **Scopes:** `LOCAL`, `PROC`/`ENDP` and `PUBLIC`, with the options
        `--alocal` (automatic locals), `--nocase` and `--equ`/`-E`
        (predefined symbols); `-I` is the caller's include search.
@@ -408,6 +410,35 @@ Design agreed 2026-10-23.
        `--w8080` (warnings for what the 8080 lacks).
     7. **`--86`, last:** PasmoNext's translation of Z80 source into 8086
        code. Asm198x has no verdicts for it, so they are recorded first.
+- **The pass loop (agreed 2026-10-23).** PasmoNext reads every line more
+  than once, and each pass inherits the last one's symbols, so `IF`, `REPT`
+  and macros are decided again on every pass. Measured:
+  - `x equ later` then `rept x`: pass 1 sees `x` as 0 and repeats nothing;
+    pass 2 repeats twice. The output is pass 2's.
+  - It is "until stable, with a cap": two passes, and a third only if a
+    symbol's value changed in the second (`setvar`: "Switching to 3 pass
+    mode"); a change in the third is "Phase error". `--pass3` starts with
+    three.
+  - Bytes written by an earlier pass stay where a later pass writes
+    nothing: `x equ later`, `org x`, `db 1`, `later equ 5` gives
+    `01 00 00 00 00 01`.
+
+  Most assemblers run passes, and they differ in exactly these answers, so
+  the loop is one mechanism and each profile gives its answers. Each is
+  measured on the reference tool:
+  - **The cap and what happens at it.** PasmoNext: two, three on a change,
+    then "Phase error". A one-pass assembler with a linker, such as ca65 or
+    rgbasm, has a cap of one.
+  - **What an unknown symbol is worth in an early pass.** PasmoNext: 0.
+  - **Which contexts need a symbol defined first.** PasmoNext: `ORG`, `IF`,
+    `REPT`, the `DS` count, `RST`, `IM`, Next `push nn`, `add rr,nn`,
+    `nextreg`'s register and `test`. A symbol defined with a value of 0 from
+    pass 1 is enough.
+  - **Whether earlier passes' bytes survive.** PasmoNext: yes.
+
+  Only what PasmoNext needs is built now, shaped so SjASMPlus slots in. The
+  split with Asm198x's engine stays clear: the front end decides which
+  lines exist, pass by pass, and the engine gives them their values.
 - **Pull requests:** 5a, the feature, CI and expressions; 5b, instructions;
   5c, directives, the layout host, spans and the entry point.
 - **As built, 5a:** the `ir` feature, CI's all-features runs and the
