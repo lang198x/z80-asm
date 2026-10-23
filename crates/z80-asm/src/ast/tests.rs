@@ -141,6 +141,7 @@ fn every_expression_kind_wraps_its_own_node() {
         ("1 ? 2:3", kinds::COND_EXPR),
         ("DEFINED x", kinds::DEFINED_EXPR),
         ("NUL", kinds::NUL_EXPR),
+        ("?? x", kinds::GETBANK_EXPR),
     ] {
         assert_eq!(expr(source).syntax().kind(), kind, "{source}");
     }
@@ -268,7 +269,7 @@ fn eval(expr: &Expr) -> Option<u32> {
         Expr::Literal(literal) => {
             let token = literal.token()?;
             match token.text().to_ascii_uppercase().as_str() {
-                "$" => 0,
+                "$" | "PC" => 0,
                 t if t.ends_with('H') => u32::from_str_radix(&t[..t.len() - 1], 16).ok()?,
                 t => t.parse().ok()?,
             }
@@ -276,6 +277,7 @@ fn eval(expr: &Expr) -> Option<u32> {
         Expr::Name(name) => (name.token()?.text() == "foo").then_some(1)?,
         Expr::Defined(defined) => truth(defined.name()?.token()?.text() == "foo"),
         Expr::Nul(nul) => truth(!nul.has_rest()),
+        Expr::GetBank(_) => return None,
         Expr::Paren(paren) => eval(&paren.expr()?)?,
         Expr::Conditional(cond) => {
             if eval(&cond.condition()?)? != 0 {

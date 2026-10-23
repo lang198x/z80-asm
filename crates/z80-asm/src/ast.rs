@@ -32,7 +32,8 @@ mod operand;
 mod statement;
 
 pub use expr::{
-    BinExpr, CondExpr, DefinedExpr, Expr, Literal, NameRef, NulExpr, ParenExpr, UnaryExpr,
+    BinExpr, CondExpr, DefinedExpr, Expr, GetBankExpr, Literal, NameRef, NulExpr, ParenExpr,
+    UnaryExpr,
 };
 pub use line::{Label, Line, SourceFile};
 pub use operand::{Index, Indirect, Operand};

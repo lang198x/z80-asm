@@ -92,6 +92,8 @@ kinds! {
     AMP_AMP,
     /// `||`
     PIPE_PIPE,
+    /// `##`, which pastes two tokens together inside a macro body.
+    SHARP_SHARP,
 
     // Nodes.
 
@@ -122,9 +124,10 @@ kinds! {
     MACRO_ARG,
     /// The file an `INCLUDE` or `INCBIN` names, quoted or not.
     FILE_NAME,
-    /// The free text after a directive such as `.ERROR`.
+    /// The text after a directive such as `.ERROR` or `MESSAGE`, kept as
+    /// written.
     TEXT,
-    /// A number, string or `$`.
+    /// A number, a string, or the current address: `$` or `PC`.
     LITERAL,
     /// A use of a name, such as a label, symbol or register.
     NAME_REF,
@@ -141,6 +144,9 @@ kinds! {
     /// `NUL` and everything after it on the line, which asks whether there
     /// is nothing after it. Used to test for a missing macro argument.
     NUL_EXPR,
+    /// `?? name`, which asks which memory bank a name is in. It is a whole
+    /// expression on its own.
+    GETBANK_EXPR,
 }
 
 /// Returns the name of a Z80 kind, such as `"IDENT"`, for tree dumps. Shared
@@ -161,9 +167,9 @@ mod tests {
         assert_eq!(name(IDENT), Some("IDENT"));
         assert_eq!(name(PIPE_PIPE), Some("PIPE_PIPE"));
         assert_eq!(name(SOURCE_FILE), Some("SOURCE_FILE"));
-        assert_eq!(name(NUL_EXPR), Some("NUL_EXPR"));
+        assert_eq!(name(GETBANK_EXPR), Some("GETBANK_EXPR"));
         assert_eq!(
-            usize::from(NUL_EXPR.get() - IDENT.get()) + 1,
+            usize::from(GETBANK_EXPR.get() - IDENT.get()) + 1,
             NAMES.len(),
             "the last kind is numbered one below the table's length"
         );

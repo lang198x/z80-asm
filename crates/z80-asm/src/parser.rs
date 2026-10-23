@@ -225,7 +225,11 @@ impl Parser<'_> {
         }
         let word = self.text_at(self.pos).to_owned();
         let colon = self.peek_nth(1) == Some(kinds::COLON);
-        if !colon && (self.is_keyword(&word) || self.starts_macro_call(&word)) {
+        // A reserved word is never a label, even with a colon: PasmoNext
+        // rejects `pc:` and `a: nop`.
+        if self.is_reserved(&word)
+            || (!colon && (self.is_keyword(&word) || self.starts_macro_call(&word)))
+        {
             return None;
         }
         if !colon && self.after_include && self.could_be_hidden_call() {
@@ -280,6 +284,11 @@ impl Parser<'_> {
             return;
         }
         let word = self.text_at(self.pos);
+        if !self.is_keyword(word) && self.is_reserved(word) {
+            let message = format!("`{word}` is a reserved word, so it cannot start a statement");
+            self.error_to_line_end(&message);
+            return;
+        }
         if self.is_mnemonic(word) {
             self.builder.start_node(kinds::INSTRUCTION);
             self.bump();
@@ -290,6 +299,16 @@ impl Parser<'_> {
             match directive.operands {
                 Operands::Expressions => self.operands(false),
                 Operands::FileName => self.file_name(),
+                Operands::FileNameThenExpressions => {
+                    self.file_name();
+                    if self.next_kind() == Some(kinds::COMMA) {
+                        self.bump_next();
+                        self.operands(false);
+                    } else {
+                        self.missing("expected `,` after the file name");
+                    }
+                }
+                Operands::Tokens => self.tokens(),
                 Operands::Include => {
                     self.file_name();
                     self.after_include = true;
@@ -331,6 +350,21 @@ impl Parser<'_> {
             }
             self.bump_next();
         }
+    }
+
+    /// `?? name`.
+    fn getbank(&mut self) {
+        self.builder.start_node(kinds::GETBANK_EXPR);
+        self.bump();
+        if self.next_kind() == Some(kinds::IDENT) {
+            self.trivia();
+            self.builder.start_node(kinds::NAME_REF);
+            self.bump();
+            self.builder.finish_node();
+        } else {
+            self.missing("expected a name after `??`");
+        }
+        self.builder.finish_node();
     }
 
     /// `(address)`, `(register)` or `(ix+d)`.
@@ -394,6 +428,19 @@ impl Parser<'_> {
         self.mark_raw(start);
     }
 
+    /// Tokens to the end of the line, up to any comment, kept as written.
+    fn tokens(&mut self) {
+        if self.at_line_end() {
+            return;
+        }
+        self.trivia();
+        self.builder.start_node(kinds::TEXT);
+        while !self.at_line_end() {
+            self.bump_next();
+        }
+        self.builder.finish_node();
+    }
+
     fn mark_raw(&mut self, start: usize) {
         let range = self.range(start, self.offset(self.pos));
         self.raw.push(range);
@@ -425,6 +472,12 @@ impl Parser<'_> {
         self.trivia();
         if self.depth >= MAX_DEPTH {
             self.error_to_line_end("this expression is nested too deeply");
+            return;
+        }
+        // `?? name` is a whole expression on its own: PasmoNext rejects
+        // `?? lbl + 1`.
+        if self.at_word(self.profile.grammar.getbank) {
+            self.getbank();
             return;
         }
         self.depth += 1;
@@ -489,6 +542,18 @@ impl Parser<'_> {
                 self.bump();
                 self.expression();
                 self.expect(kinds::R_PAREN, "expected `)`");
+                self.builder.finish_node();
+            }
+            Some(kinds::IDENT)
+                if self
+                    .profile
+                    .grammar
+                    .current_address_words
+                    .iter()
+                    .any(|w| self.at_word(Some(w))) =>
+            {
+                self.builder.start_node(kinds::LITERAL);
+                self.bump();
                 self.builder.finish_node();
             }
             Some(kinds::IDENT) if self.at_word(self.profile.grammar.nul) => {
@@ -700,6 +765,26 @@ impl Parser<'_> {
 
     fn is_keyword(&self, word: &str) -> bool {
         self.is_mnemonic(word) || self.directive(word).is_some()
+    }
+
+    /// Whether `word` is reserved without starting a statement: a register,
+    /// a condition, a word operator or another word the dialect keeps.
+    fn is_reserved(&self, word: &str) -> bool {
+        let grammar = self.profile.grammar;
+        let lower = |list: &[&str]| list.iter().any(|w| w.eq_ignore_ascii_case(word));
+        let operators = grammar.levels.iter().any(|level| {
+            let (Level::Binary(ops) | Level::Unary(ops)) = level;
+            ops.iter()
+                .any(|op| matches!(op, Operator::Word(w) if w.eq_ignore_ascii_case(word)))
+        });
+        lower(grammar.registers)
+            || lower(grammar.conditions)
+            || lower(grammar.current_address_words)
+            || operators
+            || [grammar.defined, grammar.nul, grammar.getbank]
+                .into_iter()
+                .flatten()
+                .any(|w| w.eq_ignore_ascii_case(word))
     }
 
     fn is_index_register(&self, word: &str) -> bool {

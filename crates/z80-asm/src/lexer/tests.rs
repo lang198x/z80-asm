@@ -144,6 +144,14 @@ fn a_hash_without_digits_is_not_allowed() {
 }
 
 #[test]
+fn two_hashes_paste_tokens() {
+    assert_eq!(tokens("lbl##v"), ["IDENT lbl", "SHARP_SHARP ##", "IDENT v"]);
+    // Before any number prefix, as PasmoNext reads `##FF`.
+    assert_eq!(tokens("##FF"), ["SHARP_SHARP ##", "IDENT FF"]);
+    assert_eq!(tokens("#FF"), ["NUMBER #FF"]);
+}
+
+#[test]
 fn names_take_the_characters_pasmonext_allows() {
     for name in [
         "a.b", "a?b", "@ab", "a$b", "_ab", ".ab", "?ab", ".", "@", "?2",

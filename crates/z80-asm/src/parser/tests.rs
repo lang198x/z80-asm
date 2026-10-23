@@ -138,8 +138,8 @@ fn an_unknown_word_before_something_that_cannot_start_a_statement_is_a_macro_cal
 #[test]
 fn macro_arguments_split_at_commas_outside_strings() {
     assert_eq!(
-        line("m (1,2), 'a,b',,x+1"),
-        "(LINE (MACRO_CALL m (MACRO_ARG ( 1) , (MACRO_ARG 2 )) , (MACRO_ARG 'a,b') , (MACRO_ARG ) , (MACRO_ARG x + 1)))"
+        line("show (1,2), 'a,b',,x+1"),
+        "(LINE (MACRO_CALL show (MACRO_ARG ( 1) , (MACRO_ARG 2 )) , (MACRO_ARG 'a,b') , (MACRO_ARG ) , (MACRO_ARG x + 1)))"
     );
 }
 
@@ -329,6 +329,94 @@ fn nul_takes_the_rest_of_the_line_commas_included() {
 }
 
 #[test]
+fn a_reserved_word_is_never_a_label() {
+    // PasmoNext 0.1.3 rejects each of these as "Unexpected ... used as
+    // instruction".
+    for text in ["pc: db 1", "a: nop", "m 5", "nz", "high: nop", "?? x"] {
+        let problems = problems(text);
+        assert!(
+            problems.iter().any(|p| p.contains("is a reserved word")),
+            "{text}: {problems:?}"
+        );
+        assert!(!line(text).contains("(LABEL"), "{text}");
+    }
+    // Words PasmoNext does not reserve are fine.
+    assert_eq!(
+        line("dehl: db 1"),
+        "(LINE (LABEL dehl :) (DIRECTIVE db (OPERAND (LITERAL 1))))"
+    );
+}
+
+#[test]
+fn pc_is_the_current_address() {
+    assert_eq!(
+        line("dw pc+1"),
+        "(LINE (DIRECTIVE dw (OPERAND (BIN_EXPR (LITERAL pc) + (LITERAL 1)))))"
+    );
+}
+
+#[test]
+fn getbank_is_a_whole_expression_on_its_own() {
+    assert_eq!(
+        line("db ?? lbl"),
+        "(LINE (DIRECTIVE db (OPERAND (GETBANK_EXPR ?? (NAME_REF lbl)))))"
+    );
+    assert!(problems("db 1, ?? lbl").is_empty());
+    assert!(problems("db (?? lbl)").is_empty());
+    assert_eq!(
+        problems("db ?? lbl + 1"),
+        ["10..13 expected `,` or the end of the line"]
+    );
+    assert_eq!(
+        problems("db ?? 1"),
+        [
+            "6..6 expected a name after `??`",
+            "6..7 expected `,` or the end of the line"
+        ]
+    );
+    // Touching, it is one name, as in PasmoNext.
+    assert_eq!(
+        line("db ??lbl"),
+        "(LINE (DIRECTIVE db (OPERAND (NAME_REF ??lbl))))"
+    );
+}
+
+#[test]
+fn the_next_directives_have_their_own_operand_shapes() {
+    assert_eq!(
+        line("savebin \"out.bin\",0,2"),
+        "(LINE (DIRECTIVE savebin (FILE_NAME \"out.bin\") , (OPERAND (LITERAL 0)) , (OPERAND (LITERAL 2))))"
+    );
+    assert_eq!(
+        problems("savebin \"out.bin\""),
+        ["17..17 expected `,` after the file name"]
+    );
+    // MESSAGE's items are lexed, so a bad character still counts.
+    assert_eq!(
+        line("message \"v=\", v, %d v ; c"),
+        "(LINE (DIRECTIVE message (TEXT \"v=\" , v , % d v)) ; c)"
+    );
+    assert_eq!(problems("message ^"), ["8..9 '^' is not allowed here"]);
+    // HEX reads its digits raw: PasmoNext accepts `hex 3E01`.
+    assert!(problems("hex 3E01").is_empty());
+    for text in [
+        "rb 2",
+        "rw 1",
+        "rsset 4",
+        "stack 8000h",
+        "setbank 0,5",
+        "struct pt",
+        "ends",
+        "fmessage 1",
+    ] {
+        assert!(line(text).contains("(DIRECTIVE"), "{text}");
+    }
+    for text in ["ldirscale", "popx", "fillde"] {
+        assert!(line(text).contains("(INSTRUCTION"), "{text}");
+    }
+}
+
+#[test]
 fn a_question_mark_touching_a_name_character_starts_a_name() {
     // PasmoNext reads `1?2:3` as `1` then the name `?2`, and rejects it.
     assert_eq!(
@@ -442,7 +530,7 @@ fn eval(node: &SyntaxNode) -> u32 {
     let truth = |b: bool| if b { u32::MAX } else { 0 };
     match node.kind() {
         kinds::LITERAL => match tokens[0].as_str() {
-            "$" => 0,
+            "$" | "PC" => 0,
             t if t.ends_with('H') => u32::from_str_radix(&t[..t.len() - 1], 16).unwrap(),
             t => t.parse().unwrap(),
         },

@@ -59,6 +59,10 @@ pub(crate) struct Lexical {
     /// Register names that take a prime, as `af'` does. Only these do;
     /// elsewhere an apostrophe starts a string.
     pub(crate) primed_registers: &'static [&'static str],
+    /// The operator that pastes two tokens together inside a macro body,
+    /// such as `##`. It is tried before any number prefix, so `##FF` is the
+    /// operator then `FF`.
+    pub(crate) token_paste: Option<&'static str>,
     /// Whether a backslash starts an escape inside double-quoted strings.
     pub(crate) double_quote_escapes: bool,
 }
@@ -84,6 +88,16 @@ pub(crate) struct Grammar {
     /// Registers that take a signed displacement inside parentheses, such as
     /// `ix` in `(ix+5)`. Matching ignores case.
     pub(crate) index_registers: &'static [&'static str],
+    /// Register names, in lower case. They are reserved: none can be a label
+    /// or a macro parameter.
+    pub(crate) registers: &'static [&'static str],
+    /// Condition names, such as `nz`, in lower case. Also reserved.
+    pub(crate) conditions: &'static [&'static str],
+    /// Words that mean the current address, like `$`, such as `PC`.
+    pub(crate) current_address_words: &'static [&'static str],
+    /// The word that asks which memory bank a name is in, such as `??`. It
+    /// takes one name and is a whole expression on its own.
+    pub(crate) getbank: Option<&'static str>,
 }
 
 /// A directive and the shape of its operands.
@@ -111,6 +125,13 @@ pub(crate) enum Operands {
     /// Expressions, where the first names a new macro. The keyword-first
     /// form, `MACRO name, params`.
     MacroHeader,
+    /// A quoted file name, then expressions after a comma, such as
+    /// `SAVEBIN "out.bin",start,length`.
+    FileNameThenExpressions,
+    /// Tokens to the end of the line, up to any comment, kept as written
+    /// rather than read as expressions, such as `MESSAGE`'s items. Unlike
+    /// [`Operands::Text`], they are lexed, so the lexer's problems count.
+    Tokens,
 }
 
 /// One level of expression operators.
@@ -187,14 +208,105 @@ const PASMONEXT_LEVELS: &[Level] = &[
 /// allows is checked later; the parser needs only to know they are
 /// instructions, so that they are never read as labels.
 const PASMONEXT_MNEMONICS: &[&str] = &[
-    "adc", "add", "and", "bit", "call", "ccf", "cp", "cpd", "cpdr", "cpi", "cpir", "cpl", "daa",
-    "dec", "di", "djnz", "ei", "ex", "exx", "halt", "im", "in", "inc", "ind", "indr", "ini",
-    "inir", "jp", "jr", "ld", "ldd", "lddr", "ldi", "ldir", "neg", "nop", "or", "otdr", "otir",
-    "out", "outd", "outi", "pop", "push", "res", "ret", "reti", "retn", "rl", "rla", "rlc", "rlca",
-    "rld", "rr", "rra", "rrc", "rrca", "rrd", "rst", "sbc", "scf", "set", "sla", "sll", "sra",
-    "srl", "sub", "xor", // Z80N.
-    "brlc", "bsla", "bsra", "bsrf", "bsrl", "ldirx", "ldix", "lddrx", "lddx", "ldpirx", "ldws",
-    "mirror", "mul", "nextreg", "outinb", "pixelad", "pixeldn", "setae", "swapnib", "test",
+    "adc",
+    "add",
+    "and",
+    "bit",
+    "call",
+    "ccf",
+    "cp",
+    "cpd",
+    "cpdr",
+    "cpi",
+    "cpir",
+    "cpl",
+    "daa",
+    "dec",
+    "di",
+    "djnz",
+    "ei",
+    "ex",
+    "exx",
+    "halt",
+    "im",
+    "in",
+    "inc",
+    "ind",
+    "indr",
+    "ini",
+    "inir",
+    "jp",
+    "jr",
+    "ld",
+    "ldd",
+    "lddr",
+    "ldi",
+    "ldir",
+    "neg",
+    "nop",
+    "or",
+    "otdr",
+    "otir",
+    "out",
+    "outd",
+    "outi",
+    "pop",
+    "push",
+    "res",
+    "ret",
+    "reti",
+    "retn",
+    "rl",
+    "rla",
+    "rlc",
+    "rlca",
+    "rld",
+    "rr",
+    "rra",
+    "rrc",
+    "rrca",
+    "rrd",
+    "rst",
+    "sbc",
+    "scf",
+    "set",
+    "sla",
+    "sll",
+    "sra",
+    "srl",
+    "sub",
+    "xor", // Z80N.
+    "brlc",
+    "bsla",
+    "bsra",
+    "bsrf",
+    "bsrl",
+    "ldirx",
+    "ldix",
+    "lddrx",
+    "lddx",
+    "ldpirx",
+    "ldws",
+    "mirror",
+    "mul",
+    "nextreg",
+    "outinb",
+    "pixelad",
+    "pixeldn",
+    "setae",
+    "swapnib",
+    "test",
+    "ldirscale",
+    "popx",
+    // Reserved by PasmoNext's tokenizer, though its encoding is disabled, so
+    // using it is an error.
+    "fillde",
+];
+
+/// PasmoNext 0.1.3's register names. `af'` is one word to the lexer.
+const PASMONEXT_REGISTERS: &[&str] = &[
+    "a", "af", "af'", "b", "bc", "c", "d", "de", "e", "h", "hl", "l", "sp", "ix", "ixh", "ixl",
+    "iy", "iyh", "iyl", "i", "r",
 ];
 
 const fn directive(name: &'static str, operands: Operands) -> Directive {
@@ -202,8 +314,10 @@ const fn directive(name: &'static str, operands: Operands) -> Directive {
 }
 
 /// The directives PasmoNext 0.1.3 recognises. `DM`, `IFDEF`, `DEFINE`,
-/// `PHASE` and the dotted spellings of ordinary directives, such as `.ORG`,
-/// are not among them.
+/// `PHASE`, `DUP` and the dotted spellings of ordinary directives, such as
+/// `.ORG`, are not among them. The list, with the mnemonics, registers,
+/// conditions and word operators, is checked against the keyword table in
+/// PasmoNext's tokenizer.
 const PASMONEXT_DIRECTIVES: &[Directive] = &[
     directive("ORG", Operands::Expressions),
     directive("EQU", Operands::Expressions),
@@ -234,6 +348,20 @@ const PASMONEXT_DIRECTIVES: &[Directive] = &[
     directive("END", Operands::Expressions),
     directive(".ERROR", Operands::Text),
     directive(".WARNING", Operands::Text),
+    // Spectrum Next additions in PasmoNext.
+    directive("RB", Operands::Expressions),
+    directive("RW", Operands::Expressions),
+    directive("RSSET", Operands::Expressions),
+    directive("STACK", Operands::Expressions),
+    directive("SETBANK", Operands::Expressions),
+    directive("SAVEBIN", Operands::FileNameThenExpressions),
+    directive("MESSAGE", Operands::Tokens),
+    directive("HEX", Operands::Text),
+    directive("STRUCT", Operands::Expressions),
+    directive("ENDS", Operands::Expressions),
+    // Reserved by PasmoNext's tokenizer but with no handler, so using it is
+    // an error.
+    directive("FMESSAGE", Operands::Expressions),
 ];
 
 impl Profile {
@@ -270,6 +398,7 @@ impl Profile {
             digit_separator: Some('$'),
             current_address: Some('$'),
             primed_registers: &["af"],
+            token_paste: Some("##"),
             double_quote_escapes: true,
         },
         grammar: Grammar {
@@ -280,6 +409,10 @@ impl Profile {
             defined: Some("DEFINED"),
             nul: Some("NUL"),
             index_registers: &["ix", "iy"],
+            registers: PASMONEXT_REGISTERS,
+            conditions: &["nz", "z", "nc", "c", "po", "pe", "p", "m"],
+            current_address_words: &["PC"],
+            getbank: Some("??"),
         },
     };
 
@@ -321,6 +454,259 @@ mod tests {
         assert_eq!(profile.tool(), "PasmoNext");
         assert_eq!(profile.version(), "0.1.3");
         assert_eq!(format!("{profile:?}"), "Profile(\"pasmonext-0.1.3\")");
+    }
+
+    /// The keyword table in PasmoNext 0.1.3's tokenizer (`token.cpp`, the
+    /// `nt` array, entries that are not commented out), at the commit the
+    /// Asm198x arbiter pins, 60957e6.
+    const PASMONEXT_KEYWORDS: &[&str] = &[
+        "MOD",
+        "SHL",
+        "<<",
+        "SHR",
+        ">>",
+        "NOT",
+        "EQ",
+        "LT",
+        "LE",
+        "<=",
+        "GT",
+        "GE",
+        ">=",
+        "NE",
+        "!=",
+        "NUL",
+        "DEFINED",
+        "HIGH",
+        "LOW",
+        "&&",
+        "||",
+        "##",
+        "??",
+        "ADC",
+        "ADD",
+        "AND",
+        "BIT",
+        "CALL",
+        "CCF",
+        "CP",
+        "CPD",
+        "CPDR",
+        "CPI",
+        "CPIR",
+        "CPL",
+        "DAA",
+        "DEC",
+        "DI",
+        "DJNZ",
+        "EI",
+        "EX",
+        "EXX",
+        "FILLDE",
+        "HALT",
+        "IM",
+        "IN",
+        "INC",
+        "IND",
+        "INDR",
+        "INI",
+        "INIR",
+        "JP",
+        "JR",
+        "LD",
+        "LDD",
+        "LDDR",
+        "LDI",
+        "LDIR",
+        "LDIX",
+        "LDIRX",
+        "LDDX",
+        "LDDRX",
+        "LDIRSCALE",
+        "LDPIRX",
+        "LDWS",
+        "BSLA",
+        "BSRA",
+        "BSRL",
+        "BSRF",
+        "BRLC",
+        "MIRROR",
+        "MUL",
+        "NEG",
+        "NEXTREG",
+        "NOP",
+        "OR",
+        "OTDR",
+        "OTIR",
+        "OUT",
+        "OUTD",
+        "OUTI",
+        "OUTINB",
+        "PIXELDN",
+        "PIXELAD",
+        "POP",
+        "POPX",
+        "PUSH",
+        "RES",
+        "RET",
+        "RETI",
+        "RETN",
+        "RL",
+        "RLA",
+        "RLC",
+        "RLCA",
+        "RLD",
+        "RR",
+        "RRA",
+        "RRC",
+        "RRCA",
+        "RRD",
+        "RST",
+        "SBC",
+        "SCF",
+        "SET",
+        "SETAE",
+        "SLA",
+        "SLL",
+        "SRA",
+        "SRL",
+        "SUB",
+        "SWAPNIB",
+        "TEST",
+        "XOR",
+        "A",
+        "AF",
+        "AF'",
+        "B",
+        "BC",
+        "D",
+        "E",
+        "DE",
+        "H",
+        "L",
+        "HL",
+        "SP",
+        "IX",
+        "IXH",
+        "IXL",
+        "IY",
+        "IYH",
+        "IYL",
+        "I",
+        "R",
+        "NZ",
+        "Z",
+        "NC",
+        "C",
+        "PO",
+        "PE",
+        "P",
+        "M",
+        "DEFB",
+        "DB",
+        "RB",
+        "RW",
+        "DEFM",
+        "DEFW",
+        "DW",
+        "DEFS",
+        "DS",
+        "EQU",
+        "DEFL",
+        "ORG",
+        "STACK",
+        "INCLUDE",
+        "INCBIN",
+        "SAVEBIN",
+        "FMESSAGE",
+        "MESSAGE",
+        "SETBANK",
+        "PC",
+        "ALIGN",
+        "RSSET",
+        "HEX",
+        "IF",
+        "ELSE",
+        "ENDIF",
+        "PUBLIC",
+        "END",
+        "LOCAL",
+        "PROC",
+        "ENDP",
+        "MACRO",
+        "ENDM",
+        "EXITM",
+        "REPT",
+        "IRP",
+        "STRUCT",
+        "ENDS",
+        ".ERROR",
+        ".WARNING",
+        ".SHIFT",
+    ];
+
+    #[test]
+    fn the_reserved_words_are_exactly_pasmonexts_keywords() {
+        use std::collections::BTreeSet;
+
+        let grammar = Profile::PASMONEXT_0_1_3.grammar;
+        let mut ours: BTreeSet<String> = BTreeSet::new();
+        let mut add = |word: &str| {
+            ours.insert(word.to_ascii_uppercase());
+        };
+        grammar.mnemonics.iter().for_each(|w| add(w));
+        grammar.directives.iter().for_each(|d| add(d.name));
+        grammar.registers.iter().for_each(|w| add(w));
+        grammar.conditions.iter().for_each(|w| add(w));
+        grammar.current_address_words.iter().for_each(|w| add(w));
+        [grammar.defined, grammar.nul, grammar.getbank]
+            .into_iter()
+            .flatten()
+            .for_each(&mut add);
+        Profile::PASMONEXT_0_1_3
+            .lexical
+            .token_paste
+            .into_iter()
+            .for_each(&mut add);
+        for level in grammar.levels {
+            let (Level::Binary(ops) | Level::Unary(ops)) = level;
+            for op in *ops {
+                match op {
+                    Operator::Word(w) => add(w),
+                    Operator::Symbol(kind) => {
+                        if let Some(text) = symbol_text(*kind) {
+                            add(text);
+                        }
+                    }
+                }
+            }
+        }
+        let theirs: BTreeSet<String> = PASMONEXT_KEYWORDS.iter().map(|w| (*w).to_owned()).collect();
+        // Single-character operators are tokens, not keywords, in PasmoNext.
+        let ours: BTreeSet<String> = ours
+            .into_iter()
+            .filter(|w| w.chars().count() > 1 || w.chars().all(|c| c.is_ascii_alphabetic()))
+            .collect();
+        let missing: Vec<_> = theirs.difference(&ours).collect();
+        let extra: Vec<_> = ours.difference(&theirs).collect();
+        assert!(
+            missing.is_empty() && extra.is_empty(),
+            "missing {missing:?}, extra {extra:?}"
+        );
+    }
+
+    /// The text of a symbol operator, for comparing with the keyword table.
+    fn symbol_text(kind: lang198x_syntax::SyntaxKind) -> Option<&'static str> {
+        Some(match kind {
+            kinds::SHL => "<<",
+            kinds::SHR => ">>",
+            kinds::LE => "<=",
+            kinds::GE => ">=",
+            kinds::NE => "!=",
+            kinds::AMP_AMP => "&&",
+            kinds::PIPE_PIPE => "||",
+            _ => return None,
+        })
     }
 
     #[test]

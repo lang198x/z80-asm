@@ -146,6 +146,8 @@ impl Lexer<'_> {
                 (kinds::STRING, self.string(rest, '"'))
             } else if c == '\'' {
                 (kinds::STRING, self.string(rest, '\''))
+            } else if let Some(paste) = self.rules.token_paste.filter(|p| rest.starts_with(p)) {
+                (kinds::SHARP_SHARP, paste.len())
             } else if c.is_ascii_digit() {
                 (kinds::NUMBER, self.digit_led_number(rest))
             } else if let Some(len) = self.committed_number(rest) {
