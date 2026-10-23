@@ -5,10 +5,14 @@
 //! the back end assembles the bytes PasmoNext writes. Where Asm198x's own
 //! `pasmo` dialect differs from PasmoNext, PasmoNext is followed.
 
+mod directive;
 mod expr;
 mod instruction;
+mod line;
 
+pub use expr::Known;
 pub use instruction::Quirk;
+pub use line::{Item, Lowered, line};
 
 /// Which instructions lowering accepts.
 ///

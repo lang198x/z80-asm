@@ -11,24 +11,30 @@
 //! decided while lowering when its condition is already known, and otherwise
 //! built from `&&`, one bit at a time, so the unused side is never evaluated.
 
-// Some of this module serves only the layout host, which comes next.
-#![cfg_attr(not(test), allow(dead_code))]
-
 use asm198x_ir::{BinOp, Expr as Ir};
-use lang198x_syntax::{SyntaxToken, TextRange};
+use lang198x_syntax::{DiagnosticKind, SyntaxToken, TextRange};
 
 use crate::ast::{self, View};
 use crate::kinds;
 use crate::lexer::{number_value, string_bytes};
 use crate::profile::Profile;
 
-/// What lowering an expression needs to know about the program above it.
-pub(crate) trait Known {
-    /// Whether `name` is defined above the line being lowered. PasmoNext's
-    /// `DEFINED` means this, even in data: `db defined later` is 0.
+/// What lowering needs to know about the program so far, from whatever is
+/// laying it out.
+///
+/// Lowering leaves names as names for the back end to resolve, except where
+/// PasmoNext 0.1.3 needs a value as soon as it reads the line: `ORG`, the
+/// `DS` count, `RST`, `IM` and the other operands listed in the plan. Those,
+/// and `DEFINED`, are answered from here.
+pub trait Known {
+    /// Whether `name` counts as defined for `DEFINED`. In PasmoNext that
+    /// means defined above the line, in this pass: `db defined later` is 0.
     fn defined(&self, name: &str) -> bool;
 
-    /// The value of `name`, if it is defined above and its value is final.
+    /// The value PasmoNext reads for `name` where it needs one now, or `None`
+    /// if that is an error. In PasmoNext a name has a value here once it has
+    /// been defined, above the line or in an earlier pass. Values are
+    /// PasmoNext's 16-bit ones, 0 to `$FFFF`.
     fn value(&self, name: &str) -> Option<i64>;
 
     /// The address of the line being lowered, if it is known.
@@ -38,6 +44,7 @@ pub(crate) trait Known {
 /// Why an expression could not be lowered, and where.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Problem {
+    pub(crate) kind: DiagnosticKind,
     pub(crate) range: TextRange,
     pub(crate) message: String,
 }
@@ -45,8 +52,17 @@ pub(crate) struct Problem {
 impl Problem {
     pub(crate) fn at(node: &impl View, message: impl Into<String>) -> Self {
         Self {
+            kind: DiagnosticKind::Invalid,
             range: node.syntax().text_range(),
             message: message.into(),
+        }
+    }
+
+    /// Something PasmoNext accepts that lowering does not handle yet.
+    pub(crate) fn not_yet(node: &impl View, message: impl Into<String>) -> Self {
+        Self {
+            kind: DiagnosticKind::Unsupported,
+            ..Self::at(node, message)
         }
     }
 }
@@ -180,7 +196,7 @@ fn upper(token: Option<SyntaxToken>) -> Option<String> {
 }
 
 /// `expr` kept to 16 bits, as PasmoNext's `address` keeps it.
-fn word(expr: Ir) -> Ir {
+pub(super) fn word(expr: Ir) -> Ir {
     Ir::Bin(BinOp::And, Box::new(expr), Box::new(Ir::Num(0xFFFF)))
 }
 

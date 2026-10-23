@@ -455,6 +455,29 @@ Design agreed 2026-10-23.
     corner on PasmoNext, which caught two that were written from reasoning
     rather than measured. Seven deliberate breaks are each caught.
 
+- **As built, 5c step 1:** `lower::line`, `lower::{Item, Lowered, Known}`,
+  and `expand::{Location, Call}` with `Expander::{locate, calls, file}`.
+  - **Directives:** `ORG`, `EQU`, `DEFL`, `DEFB`/`DB`/`DEFM`, `DEFW`/`DW`,
+    `DEFS`/`DS`, `ALIGN`, `INCBIN` and `END`, each following its routine in
+    PasmoNext's `asm.cpp`. Every other directive PasmoNext accepts is
+    reported as not lowered yet, with the `Unsupported` kind, by name.
+  - **Folded only where PasmoNext needs the value now:** `ORG` and the `DS`
+    count. A `DS` fill defined further on stays a value per byte, for the
+    back end. A label before `ORG` is its own statement after it, since it
+    takes the new address.
+  - **Calls:** the expander re-reads program lines for a `REPT` or a macro
+    without arguments, so no expansion text records the call. Each frame
+    therefore links to the one around it, and each line holds the innermost.
+  - **Measured on the way:** only `ORG`, `ALIGN`, `ELSE` and `ENDM` ignore
+    text after their operands. `ELSE` and `ENDM` already do here; `org 5
+    junk` and `align 2 junk` are still rejected by the parser, which needs a
+    profile rule for it (to agree, then build).
+  - **Checked:** unit tests from the measured programs, the bytes evaluated
+    by `asm198x-ir`; a `lower` fuzz target; ten mutants, all caught once two
+    redundant checks were removed and the test helper stopped truncating.
+  - **Found on the way, fixed first:** a register such as `i` was accepted as
+    a `REPT` counter's name (z80-asm#22).
+
 ### 6. The gate, in Asm198x
 
 Pull requests to `asm198x/asm198x`, after publishing `lang198x-z80-asm`.

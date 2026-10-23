@@ -11,9 +11,6 @@
 //! really assembled. Each departure is recorded as a [`Quirk`], so a tool
 //! that ports source to another assembler knows what to rewrite.
 
-// Some of this module serves only the layout host, which comes next.
-#![cfg_attr(not(test), allow(dead_code))]
-
 use asm198x_ir::{BinOp, Expr as Ir, Operation, Piece};
 use isa198x::{InstructionSet, z80};
 use lang198x_syntax::{SyntaxKind, SyntaxToken};
@@ -32,6 +29,7 @@ pub(crate) struct Lowered {
     pub(crate) quirks: Vec<Quirk>,
 }
 
+#[cfg(test)]
 impl Lowered {
     /// The warnings the quirks call for.
     pub(crate) fn warnings(&self) -> impl Iterator<Item = String> + '_ {
@@ -828,7 +826,7 @@ impl Lowering<'_> {
 }
 
 /// The tokens of `node` that carry meaning.
-fn meaningful_tokens(node: &lang198x_syntax::SyntaxNode) -> Vec<SyntaxToken> {
+pub(super) fn meaningful_tokens(node: &lang198x_syntax::SyntaxNode) -> Vec<SyntaxToken> {
     node.descendants()
         .filter_map(|element| element.into_token())
         .filter(|token| {
@@ -884,7 +882,7 @@ fn displacement(value: Ir, minus: bool) -> Ir {
     }
 }
 
-fn low_byte(value: Ir) -> Ir {
+pub(super) fn low_byte(value: Ir) -> Ir {
     Ir::Bin(BinOp::And, Box::new(value), Box::new(Ir::Num(0xFF)))
 }
 

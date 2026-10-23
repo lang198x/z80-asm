@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [lex, parse, expand]
+        target: [lex, parse, expand, lower]
     steps:
       - uses: actions/checkout@v7
         with:

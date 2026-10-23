@@ -18,7 +18,9 @@ ir = ["dep:asm198x-ir", "dep:isa198x"]
 
 [dependencies]
 lang198x-syntax = "0.1.2"
-asm198x-ir = { version = "0.0.72", optional = true }
+# A range, not ^0.0.72: Asm198x patches this to its own workspace copy, so
+# its releases must still match. CI resolves the newest, so a break shows.
+asm198x-ir = { version = ">=0.0.72, <0.1", optional = true }
 # The instruction forms lowering chooses from; asm198x-ir names its types.
 isa198x = { version = "0.1.7", optional = true }
 
