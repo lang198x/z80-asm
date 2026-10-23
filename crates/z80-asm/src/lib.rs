@@ -21,6 +21,8 @@ pub mod ast;
 pub mod expand;
 pub mod kinds;
 mod lexer;
+#[cfg(feature = "ir")]
+pub mod lower;
 #[cfg(test)]
 mod measured;
 mod parser;

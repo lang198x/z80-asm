@@ -453,3 +453,32 @@ fn numbers_have_the_values_pasmonext_assembled() {
     }
     assert_eq!(number_value("12G", &rules), None);
 }
+
+#[test]
+fn strings_have_the_bytes_pasmonext_assembled() {
+    // Each was assembled by PasmoNext 0.1.3 with `db`.
+    let rules = Profile::PASMONEXT_0_1_3.lexical;
+    for (text, expected) in [
+        ("\"\\n\"", &[0x0A][..]),
+        ("\"\\x41\"", b"A"),
+        ("\"\\x414\"", b"A4"),
+        ("\"\\xg\"", b"\0g"),
+        ("\"\\101\\0\"", b"A\0"),
+        ("\"\\777\"", &[0xFF]),
+        ("\"\\q\"", b"q"),
+        ("\"a\\\\b\"", b"a\\b"),
+        ("\"a\\\"b\"", b"a\"b"),
+        ("'a\\b'", b"a\\b"),
+        ("'it''s'", b"it's"),
+        ("''''", b"'"),
+    ] {
+        assert_eq!(
+            string_bytes(text, &rules).as_deref(),
+            Some(expected),
+            "{text}"
+        );
+    }
+    for unclosed in ["\"abc", "'abc", "\"a\\\"", "\"a\"b"] {
+        assert_eq!(string_bytes(unclosed, &rules), None, "{unclosed}");
+    }
+}

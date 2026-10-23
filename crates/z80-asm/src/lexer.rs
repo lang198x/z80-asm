@@ -426,6 +426,76 @@ pub(crate) fn number_value(text: &str, rules: &Lexical) -> Option<u64> {
     })
 }
 
+/// The bytes of a string token, read as PasmoNext's tokenizer reads them:
+/// a doubled quote is one quote, and in double-quoted strings, if the
+/// profile has escapes, a backslash starts one. `None` if the string has no
+/// closing quote.
+///
+/// The escapes are `\n`, `\r`, `\t`, `\a`, up to three octal digits, and
+/// `\x` with up to two hexadecimal digits, none meaning zero. Any other
+/// character after a backslash stands for itself. Each character is one
+/// byte, its code's low eight bits, as in PasmoNext's `char`.
+#[cfg(any(feature = "ir", test))]
+pub(crate) fn string_bytes(text: &str, rules: &Lexical) -> Option<Vec<u8>> {
+    let mut chars = text.chars().peekable();
+    let quote = chars.next()?;
+    let escapes = quote == '"' && rules.double_quote_escapes;
+    // Truncation is the point: PasmoNext keeps each character in a `char`.
+    #[allow(clippy::cast_possible_truncation)]
+    let byte = |c: u32| c as u8;
+    let mut bytes = Vec::new();
+    while let Some(c) = chars.next() {
+        if c == quote {
+            if !escapes && chars.peek() == Some(&quote) {
+                chars.next();
+                bytes.push(byte(u32::from(quote)));
+                continue;
+            }
+            return chars.next().is_none().then_some(bytes);
+        }
+        if !(escapes && c == '\\') {
+            bytes.push(byte(u32::from(c)));
+            continue;
+        }
+        let escaped = chars.next()?;
+        let value = match escaped {
+            'n' => 0x0A,
+            'r' => 0x0D,
+            't' => 0x09,
+            'a' => 0x07,
+            '0'..='7' => {
+                let mut value = escaped.to_digit(8).unwrap_or(0);
+                for _ in 0..2 {
+                    match chars.peek().and_then(|c| c.to_digit(8)) {
+                        Some(digit) => {
+                            value = value * 8 + digit;
+                            chars.next();
+                        }
+                        None => break,
+                    }
+                }
+                value
+            }
+            'x' | 'X' => {
+                let mut value = 0;
+                for _ in 0..2 {
+                    match chars.peek().and_then(|c| c.to_digit(16)) {
+                        Some(digit) => {
+                            value = value * 16 + digit;
+                            chars.next();
+                        }
+                        None => break,
+                    }
+                }
+                value
+            }
+            other => u32::from(other),
+        };
+        bytes.push(byte(value));
+    }
+    None
+}
+
 /// Whether a run that starts with a digit is a number the profile accepts.
 fn valid_digit_led(text: &str, rules: &Lexical) -> bool {
     let digits: String = text

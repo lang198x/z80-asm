@@ -11,8 +11,14 @@ categories = ["parsing"]
 # Not published until the parser does something; the first publish is by hand.
 publish = false
 
+[features]
+# Lowering to asm198x-ir, for the Asm198x back end. Off by default, so tools
+# that need only the tree build without any Asm198x crate.
+ir = ["dep:asm198x-ir"]
+
 [dependencies]
 lang198x-syntax = "0.1.2"
+asm198x-ir = { version = "0.0.72", optional = true }
 
 [dev-dependencies]
 # Generated tests only, as approved in the shared syntax layer decision.

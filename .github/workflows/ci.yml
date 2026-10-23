@@ -24,6 +24,33 @@ jobs:
       # Every Z80 dialect will rest on this parser. Ratchet up as tests grow;
       # never down.
       coverage-floor: 95
+      # Lowering to asm198x-ir sits behind the `ir` feature. Clippy and the
+      # tests run with it as well as without, and coverage counts it.
+      all-features: true
+      coverage-args: --all-features
+
+  # The parser, preprocessing and views must build without any Asm198x or
+  # Isa198x crate, so tools that need only the tree stay self-contained. The
+  # second check proves the first can fail.
+  separation:
+    name: Default build has no Asm198x crates
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Check the default and ir dependency trees
+        run: |
+          tree() { cargo tree -p lang198x-z80-asm -e normal --prefix none --format '{p}' "$@"; }
+          if tree | grep -E '^(asm198x-|isa198x )'; then
+            echo "The default build depends on an Asm198x or Isa198x crate." >&2
+            exit 1
+          fi
+          tree --features ir | grep -q '^asm198x-ir ' || {
+            echo "The ir build has no asm198x-ir, so this check would pass on anything." >&2
+            exit 1
+          }
 
   # Pull requests do not fuzz: a time-boxed run is not repeatable, so it could
   # fail a pull request that did not cause the problem. Fuzzing runs weekly in
