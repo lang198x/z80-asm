@@ -30,6 +30,10 @@ artifacts and the verdict corpus belong to Asm198x.
   byte gate runs in Asm198x against a pinned pair of versions.
 - **Profiles name the tool version they describe.** The first is PasmoNext
   0.1.3, not Julian Albo's Pasmo 0.5.x.
+- **Lowering to `asm198x-ir` sits behind the optional `ir` feature, off by
+  default.** The parser, preprocessing, typed views and profiles must build
+  without any Asm198x crate, so tools that need only the tree stay
+  self-contained. CI checks both builds.
 - **Cross-repository links go through published versions,** never `git` +
   `rev` pins. A local path override for development is never committed.
 - **Parsing never fails and no input panics.** Broken source becomes `ERROR`
