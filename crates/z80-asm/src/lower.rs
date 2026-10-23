@@ -12,7 +12,7 @@ mod line;
 
 pub use expr::Known;
 pub use instruction::Quirk;
-pub use line::{Item, Lowered, line};
+pub use line::{Item, Lowered, expression, line};
 
 /// Which instructions lowering accepts.
 ///
