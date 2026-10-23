@@ -751,40 +751,19 @@ impl Parser<'_> {
     // The profile's vocabulary.
 
     fn is_mnemonic(&self, word: &str) -> bool {
-        let mnemonics = self.profile.grammar.mnemonics;
-        mnemonics.iter().any(|m| m.eq_ignore_ascii_case(word))
+        self.profile.grammar.is_mnemonic(word)
     }
 
     fn directive(&self, word: &str) -> Option<Directive> {
-        let directives = self.profile.grammar.directives;
-        directives
-            .iter()
-            .find(|d| d.name.eq_ignore_ascii_case(word))
-            .copied()
+        self.profile.grammar.directive(word)
     }
 
     fn is_keyword(&self, word: &str) -> bool {
-        self.is_mnemonic(word) || self.directive(word).is_some()
+        self.profile.grammar.is_keyword(word)
     }
 
-    /// Whether `word` is reserved without starting a statement: a register,
-    /// a condition, a word operator or another word the dialect keeps.
     fn is_reserved(&self, word: &str) -> bool {
-        let grammar = self.profile.grammar;
-        let lower = |list: &[&str]| list.iter().any(|w| w.eq_ignore_ascii_case(word));
-        let operators = grammar.levels.iter().any(|level| {
-            let (Level::Binary(ops) | Level::Unary(ops)) = level;
-            ops.iter()
-                .any(|op| matches!(op, Operator::Word(w) if w.eq_ignore_ascii_case(word)))
-        });
-        lower(grammar.registers)
-            || lower(grammar.conditions)
-            || lower(grammar.current_address_words)
-            || operators
-            || [grammar.defined, grammar.nul, grammar.getbank]
-                .into_iter()
-                .flatten()
-                .any(|w| w.eq_ignore_ascii_case(word))
+        self.profile.grammar.is_reserved(word)
     }
 
     fn is_index_register(&self, word: &str) -> bool {

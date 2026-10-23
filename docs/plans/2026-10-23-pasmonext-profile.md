@@ -1,6 +1,6 @@
 # Plan: the Z80 family parser with a PasmoNext profile
 
-**Status:** Agreed 2026-10-23. Steps 1 to 3 are done; step 4's design is agreed.
+**Status:** Agreed 2026-10-23. Steps 1 to 4 are done.
 **Binding records:** Lang198x's
 [shared syntax layer decision](https://github.com/lang198x/lang198x/blob/main/decisions/shared-syntax-layer.md)
 and 198x's
@@ -176,29 +176,72 @@ from `lang198x-syntax` 0.1.2, already released.
     Makefile generates. With that file generated in a scratch copy, it loads
     too, and PasmoNext assembles it.
 
-#### 4b. The expander
+#### 4b. The expander (done)
 
-- **Files:** `crates/z80-asm/src/expand/`, one module per construct.
-- **What:** walks the program's lines once and yields the *active* lines, in
-  order, to its caller.
-  - **Conditions:** at `IF`, `REPT` and `IRP`, it asks a host trait, roughly
-    `evaluate(expr, span) -> value, unknown or error`. In production the host
-    is lowering, which has seen every line before and so knows the addresses
-    so far. Tests use a host that evaluates constants.
-  - **Macros:** it keeps the definitions. A call substitutes the arguments into
-    the body as text, with `Expanded` origins, parses the result with
-    `parse_with_macros`, and yields its lines. `EXITM` and `.SHIFT` work
-    inside a call.
-  - **What passes through:** `LOCAL`, `PROC`, `ENDP`, `INCBIN` and every
-    ordinary instruction and directive go to the host unchanged.
-  - **What it drops:** lines in a false `IF` branch, in a macro body until it
-    is called, and after `END`. Their syntax diagnostics are dropped; their
-    lexer diagnostics are kept, as PasmoNext reports those anywhere.
-- **Verified by:** tests that every token in an expansion traces back to the
-  text a person wrote; recursion limits and unterminated blocks giving clean
-  diagnostics; and byte comparisons with PasmoNext for programs that use only
-  `DB`/`DW`, constants, `IF`, `REPT`, `IRP` and macros, where the test host can
-  produce the bytes itself.
+- **Files:** `crates/z80-asm/src/expand/expander.rs`, with `head.rs` (how a
+  line starts) and `substitute.rs` (arguments and `##`).
+- **Reference:** PasmoNext's own source settled what probing could not. It is
+  at <https://github.com/Ckirby101/pasmoNext>, commit `60957e6`, the one the
+  Asm198x arbiter pins: `asm.cpp`'s `dopass`, `parseline`, `parselabel`,
+  `parseIF`, `parseELSE`, `parseMACRO`, `gotoENDM`, `expandMACRO`,
+  `parseREPT`, `parseIRP` and the macro frame classes. PasmoNext is GPL with no
+  version named, so GPL v2 section 9 lets us take any version; Lang198x is
+  GPL-2.0-or-later, so following its logic is compatible. The spec is still
+  the measured cases, each a test; the code is our own structure and cites
+  the PasmoNext routine it follows.
+- **Model, as in PasmoNext:** one cursor over the program's lines, and a stack
+  of macro, `REPT` and `IRP` frames. Block ends are found as lines run, not
+  collected first, which reproduces PasmoNext's edge cases:
+  - a false `IF` skips by looking at each line's first token, or its second
+    after an ordinary name; `ENDM` there stops the skip and is read again; a
+    `MACRO`, `REPT` or `IRP` jumps past the next line and then to an `ENDM`,
+    so `rept 2` directly followed by `endm` inside `IF 0` swallows the
+    `ENDIF`;
+  - a macro body ends at an `ENDM` that is the first token on its line, so a
+    labelled `ENDM` is not one;
+  - each frame starts its own `IF` count, so an `IF` opened inside a macro
+    cannot be closed outside it;
+  - `REPT count, name, start, step` sets a counter before each pass; counts
+    wrap at 65,536;
+  - `REPT` and `IRP` inside a macro substitute the macro's arguments too, and
+    their `.SHIFT` shifts the macro's.
+- **Lines are parsed in place.** A line with nothing to substitute reaches the
+  host as already parsed. A substituted line is parsed again, as an
+  expansion, with `Expanded` origins pointing at the body and the argument.
+  A line whose meaning depends on macros defined since the program was
+  parsed, such as a macro defined in a false `IF`, is parsed again with the
+  macros actually defined.
+- **Host:** `evaluate(expr)` for `IF` and `REPT`, `set_counter` for a `REPT`
+  counter, and `enter`/`leave` around each macro, `REPT` and `IRP`, for
+  `LOCAL` scoping.
+- **Limits:** PasmoNext crashes on endless recursion but handles 1,000 deep.
+  Frames nest at most 10,000 deep, and at most 10 million lines run.
+- **Verified by:** tests that each measured case gives PasmoNext's bytes,
+  using a test host that is a tiny `ORG`/`DB`/`DW`/`EQU`/`DEFL` assembler;
+  provenance tests that substituted text traces to the body and the argument;
+  and mutations.
+- **As built:** `expand::{Expander, Host, ActiveLine, Block, Limits}`.
+  - **Measured:** 117 programs assembled by PasmoNext 0.1.3 give its exact
+    bytes, or its rejection, through the test host.
+  - **Lines:** a label before a `REPT`, `IRP` or call reaches the host as a
+    label-only line. Diagnostics from a line that runs many times are
+    reported once. Neighbouring pieces copied from one place are joined, so
+    a span across them traces back whole.
+  - **Limits are settable:** frames (10,000, where PasmoNext manages 10,000
+    and crashes at 20,000), lines run (10 million) and substituted text
+    (64 MiB). The fuzzer found that a macro passing its argument back to
+    itself grows its text at every level, as PasmoNext's does too; the text
+    cap stops it with a diagnostic instead of exhausting memory.
+  - **Found on the way, fixed first:** `NUL` (z80-asm#9), and the reserved
+    words, taken from PasmoNext's tokenizer (z80-asm#10).
+  - **Checked outside the tests:** all 391 PasmoNext curriculum programs
+    expand, 63 `IF`/`REPT` evaluations among them. The only expander
+    problems are the two Sega demos that use `P` as a symbol
+    (code198x/code-samples#181).
+  - **Fuzz target `expand`:** a host with small numbers and tight limits; no
+    crashes in 32,093 runs.
+  - **The tests can fail:** nine deliberate breaks, one for each PasmoNext
+    rule, are each caught.
 
 **Carried over from step 2:** one known edge: in an unquoted file name such as
 `it's.asm ; c`, the apostrophe opens a string that swallows the comment.
