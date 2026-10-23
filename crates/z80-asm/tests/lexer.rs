@@ -57,7 +57,7 @@ fn a_spectrum_border_program() {
 
 #[test]
 fn errors_stay_in_the_tree() {
-    let text = "ld a,12G ^ [x]\ndb \"open\n";
+    let text = "ld a,12G ^ \\x\ndb \"open\n";
     snapshot("lex-errors.tree", text);
     let lexed = lex(text, Profile::PASMONEXT_0_1_3);
     let messages: Vec<_> = lexed
@@ -70,8 +70,7 @@ fn errors_stay_in_the_tree() {
         [
             "`12G` is not a valid number",
             "'^' is not allowed here",
-            "'[' is not allowed here",
-            "']' is not allowed here",
+            "'\\\\' is not allowed here",
             "this string has no closing \"",
         ]
     );

@@ -331,7 +331,7 @@ impl Parser<'_> {
     }
 
     /// Operands separated by commas. An instruction operand that starts with
-    /// `(` is an indirection.
+    /// `(`, or `[` if the profile allows it, is an indirection.
     fn operands(&mut self, instruction: bool) {
         if self.at_line_end() {
             return;
@@ -339,7 +339,12 @@ impl Parser<'_> {
         loop {
             self.trivia();
             self.builder.start_node(kinds::OPERAND);
-            if instruction && self.current() == Some(kinds::L_PAREN) {
+            let opens = match self.current() {
+                Some(kinds::L_PAREN) => true,
+                Some(kinds::L_BRACK) => self.profile.grammar.bracket_indirection,
+                _ => false,
+            };
+            if instruction && opens {
                 self.indirect();
             } else {
                 self.expression();
@@ -367,9 +372,15 @@ impl Parser<'_> {
         self.builder.finish_node();
     }
 
-    /// `(address)`, `(register)` or `(ix+d)`.
+    /// `(address)`, `(register)` or `(ix+d)`, or the same in brackets. It
+    /// closes with the partner of what opened it.
     fn indirect(&mut self) {
         self.builder.start_node(kinds::INDIRECT);
+        let (close, expected) = if self.current() == Some(kinds::L_BRACK) {
+            (kinds::R_BRACK, "expected `]`")
+        } else {
+            (kinds::R_PAREN, "expected `)`")
+        };
         self.bump();
         self.trivia();
         let indexed = self.current() == Some(kinds::IDENT)
@@ -386,7 +397,7 @@ impl Parser<'_> {
         } else {
             self.expression();
         }
-        self.expect(kinds::R_PAREN, "expected `)`");
+        self.expect(close, expected);
         self.builder.finish_node();
     }
 

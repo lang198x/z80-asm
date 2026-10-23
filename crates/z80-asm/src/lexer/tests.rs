@@ -288,7 +288,6 @@ fn the_operator_set_is_pasmonexts() {
 fn characters_pasmonext_rejects_are_errors() {
     for (text, shown) in [
         ("^", "'^'"),
-        ("[", "'['"),
         ("\\", "'\\\\'"),
         ("\0", "'\\0'"),
         ("\u{1a}", "'\\u{1a}'"),
@@ -481,4 +480,13 @@ fn strings_have_the_bytes_pasmonext_assembled() {
     for unclosed in ["\"abc", "'abc", "\"a\\\"", "\"a\"b"] {
         assert_eq!(string_bytes(unclosed, &rules), None, "{unclosed}");
     }
+}
+
+#[test]
+fn brackets_are_tokens_even_where_nothing_uses_them() {
+    // PasmoNext 0.1.3 assembles ` if 0` / ` db [` / ` endif`: its tokenizer
+    // takes `[` and `]`, and only the parser rejects them outside an
+    // indirect operand.
+    assert_eq!(tokens("[]"), ["L_BRACK [", "R_BRACK ]"]);
+    assert!(problems("[]").is_empty());
 }

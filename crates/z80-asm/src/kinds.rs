@@ -50,6 +50,10 @@ kinds! {
     L_PAREN,
     /// `)`
     R_PAREN,
+    /// `[`, which some dialects take as `(` around an indirect operand.
+    L_BRACK,
+    /// `]`
+    R_BRACK,
     /// `+`
     PLUS,
     /// `-`
