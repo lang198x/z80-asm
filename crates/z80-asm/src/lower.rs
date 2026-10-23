@@ -8,6 +8,8 @@
 mod expr;
 mod instruction;
 
+pub use instruction::Quirk;
+
 /// Which instructions lowering accepts.
 ///
 /// PasmoNext 0.1.3 always accepts the Spectrum Next's extra instructions.
