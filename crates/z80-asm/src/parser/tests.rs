@@ -149,15 +149,12 @@ fn a_leading_parenthesis_makes_an_instruction_operand_indirect() {
         line("ld hl,(1000h+2)"),
         "(LINE (INSTRUCTION ld (OPERAND (NAME_REF hl)) , (OPERAND (INDIRECT ( (BIN_EXPR (LITERAL 1000h) + (LITERAL 2)) )))))"
     );
-    // Nothing may follow the closing parenthesis.
-    assert_eq!(
-        problems("ld a,(2)*3"),
-        ["8..10 expected `,` or the end of the line"]
-    );
-    assert_eq!(
-        problems("ld hl,(1000h)+2"),
-        ["13..15 expected `,` or the end of the line"]
-    );
+    // When more of the operand follows the closing parenthesis, the
+    // parentheses group an expression. PasmoNext rejects these two, because
+    // `ld a,` and `ld hl,` have memory forms; lowering decides that, since
+    // `ld b,(2)*3` is valid.
+    assert!(problems("ld a,(2)*3").is_empty());
+    assert!(!line("ld hl,(1000h)+2").contains("INDIRECT"));
     // Inside, parentheses group as usual.
     assert!(problems("ld a,((1)+1)").is_empty());
     // Not leading, they are an ordinary expression.
@@ -693,4 +690,27 @@ fn an_indirect_operand_closes_with_the_partner_of_what_opened_it() {
     assert!(!problems("ld a,[[1]]").is_empty());
     assert!(!problems("db [1]").is_empty());
     assert!(!problems("ld a,[1]+1").is_empty());
+}
+
+#[test]
+fn parentheses_followed_by_more_of_the_operand_group_an_expression() {
+    // PasmoNext 0.1.3 assembled `ld b,(1)+1` as `06 02`, reading the
+    // operand again as an expression when it found no memory form.
+    assert_eq!(
+        line("ld b,(1)+1"),
+        "(LINE (INSTRUCTION ld (OPERAND (NAME_REF b)) , (OPERAND (BIN_EXPR (PAREN_EXPR ( (LITERAL 1) )) + (LITERAL 1)))))"
+    );
+    assert_eq!(
+        line("call ((1)+1)*2"),
+        "(LINE (INSTRUCTION call (OPERAND (BIN_EXPR (PAREN_EXPR ( (BIN_EXPR (PAREN_EXPR ( (LITERAL 1) )) + (LITERAL 1)) )) * (LITERAL 2)))))"
+    );
+    // Followed by a comma, a comment or nothing, it stays an indirection.
+    for indirect in ["out (c),a", "ld a,(1) ; c", "ld (1234h),a", "jp (hl)"] {
+        assert!(line(indirect).contains("INDIRECT"), "{indirect}");
+        assert!(problems(indirect).is_empty(), "{indirect}");
+    }
+    // An unclosed group stays an indirection, which reports the missing `)`.
+    assert!(line("ld a,(1").contains("INDIRECT"));
+    // Brackets never group.
+    assert!(!problems("ld b,[1]+1").is_empty());
 }
