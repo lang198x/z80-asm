@@ -11,5 +11,7 @@ mod head;
 mod include;
 mod substitute;
 
-pub use expander::{ActiveLine, Block, Expander, Host, Limits};
+pub use expander::{ActiveLine, Block, Call, Expander, Host, Limits, Location};
+#[cfg(feature = "ir")]
+pub(crate) use include::unquote;
 pub use include::{LoadedFile, Program};

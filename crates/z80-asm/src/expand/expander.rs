@@ -14,14 +14,18 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 
+mod locate;
+
+pub use locate::{Call, Location};
+
 use lang198x_syntax::{
     Diagnostic, DiagnosticKind, ExpansionBuilder, Origin, Provenance, Span, TextId, TextRange,
     TextSize,
 };
 
-use super::Program;
 use super::head::{self, Tok, Word};
 use super::substitute::{self, Arg, Piece};
+use super::{LoadedFile, Program};
 use crate::ast::{Expr, Line, SourceFile, Statement, View};
 use crate::profile::Role;
 use crate::{ParseError, Profile, kinds, lex, parse, parse_with_macros};
@@ -108,6 +112,17 @@ pub struct ActiveLine {
     text: TextId,
     offset: TextSize,
     label_only: bool,
+    /// The innermost macro call, `REPT` or `IRP` running the line.
+    running: Option<Rc<Running>>,
+}
+
+/// A macro call, `REPT` or `IRP` being run, linked to the one around it, so
+/// a line can say what it came through without copying the whole stack.
+#[derive(Debug, PartialEq, Eq)]
+struct Running {
+    name: String,
+    site: Span,
+    outer: Option<Rc<Running>>,
 }
 
 impl ActiveLine {
@@ -188,6 +203,8 @@ struct Frame {
     kind: Kind,
     /// The call, `REPT` or `IRP` line, for provenance.
     site: Span,
+    /// The frame as the lines it runs see it.
+    running: Rc<Running>,
     /// The `IF` count outside the frame, restored when it ends.
     outer_if_level: u32,
 }
@@ -238,6 +255,9 @@ pub struct Expander {
     profile: Profile,
     limits: Limits,
     provenance: Provenance,
+    files: Vec<LoadedFile>,
+    /// Where each line of each file starts, for [`Expander::locate`].
+    line_starts: Vec<Vec<TextSize>>,
     program: TextId,
     lines: Vec<Line>,
     /// The syntax problems of each program line, reported only if it runs.
@@ -286,6 +306,11 @@ impl Expander {
         let text = program.text().to_owned();
         let id = TextId::Expansion(program.id());
         let provenance = program.provenance().clone();
+        let files = program.files().to_vec();
+        let line_starts = files
+            .iter()
+            .map(|file| locate::line_starts(file.text()))
+            .collect();
         let parse = parse(&text, profile)?;
         let lines: Vec<Line> = SourceFile::cast(parse.tree().root())
             .map(|file| file.lines().collect())
@@ -314,6 +339,8 @@ impl Expander {
             profile,
             limits,
             provenance,
+            files,
+            line_starts,
             program: id,
             lines,
             line_problems,
@@ -540,7 +567,13 @@ impl Expander {
         }
     }
 
-    fn push(&mut self, kind: Kind, site: Span, block: Block, host: &mut dyn Host) -> bool {
+    fn push(
+        &mut self,
+        kind: Kind,
+        (name, site): (&str, Span),
+        block: Block,
+        host: &mut dyn Host,
+    ) -> bool {
         if self.frames.len() >= self.limits.frames {
             let max = self.limits.frames;
             self.report_here(format!(
@@ -549,9 +582,15 @@ impl Expander {
             self.stop(host);
             return false;
         }
+        let running = Rc::new(Running {
+            name: name.to_owned(),
+            site,
+            outer: self.frames.last().map(|frame| Rc::clone(&frame.running)),
+        });
         self.frames.push(Frame {
             kind,
             site,
+            running,
             outer_if_level: self.if_level,
         });
         self.if_level = 0;
@@ -938,7 +977,7 @@ impl Expander {
             args,
             return_to: self.cursor.unwrap_or(0),
         };
-        if self.push(kind, current_span(current), Block::Macro, host) {
+        if self.push(kind, (name, current_span(current)), Block::Macro, host) {
             self.cursor = Some(body);
         }
     }
@@ -1001,7 +1040,7 @@ impl Expander {
             done: 0,
             counter,
         };
-        if self.push(kind, site, Block::Repeat, host)
+        if self.push(kind, ("REPT", site), Block::Repeat, host)
             && let Some((name, value)) = first
         {
             host.set_counter(&name, value);
@@ -1036,7 +1075,7 @@ impl Expander {
             values,
             index: 0,
         };
-        self.push(kind, current_span(current), Block::Irp, host);
+        self.push(kind, ("IRP", current_span(current)), Block::Irp, host);
     }
 
     // Handing lines over.
@@ -1047,6 +1086,7 @@ impl Expander {
             text: current.text,
             offset: current.offset,
             label_only,
+            running: self.frames.last().map(|frame| Rc::clone(&frame.running)),
         });
     }
 

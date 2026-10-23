@@ -38,6 +38,7 @@ const MAX_FILES: usize = 4096;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadedFile {
     name: String,
+    text: String,
     included_at: Option<Span>,
 }
 
@@ -47,6 +48,12 @@ impl LoadedFile {
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Returns the file's text, as it was read.
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.text
     }
 
     /// Returns the `INCLUDE` line that read this file in, or `None` for the
@@ -104,6 +111,7 @@ impl Program {
             builder: ExpansionBuilder::new(),
             files: vec![LoadedFile {
                 name: root.to_owned(),
+                text: text.to_owned(),
                 included_at: None,
             }],
             diagnostics: Vec::new(),
@@ -193,6 +201,7 @@ impl<L: FnMut(&str) -> Option<String>> Splicer<L> {
                 };
                 self.files.push(LoadedFile {
                     name,
+                    text: included.clone(),
                     included_at: Some(site),
                 });
                 self.splice(next, &included, depth + 1);
@@ -293,7 +302,7 @@ fn too_many_message(depth: usize) -> String {
 }
 
 /// The text between a string's quotes, as written.
-fn unquote(string: &str) -> String {
+pub(crate) fn unquote(string: &str) -> String {
     let inner = string.get(1..).unwrap_or("");
     let quote = string.chars().next();
     let inner = match quote {

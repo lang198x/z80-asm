@@ -8,14 +8,15 @@
 //! says where the dialect sits on each of those details.
 //!
 //! The parser builds a lossless tree with `lang198x-syntax`, so joining its
-//! tokens gives back the source exactly. It then lowers the tree to
-//! `asm198x-ir`, which the Asm198x back end assembles. A dialect is supported
-//! once that path produces the same bytes as the real assembler across its
-//! recorded verdicts.
+//! tokens gives back the source exactly. [`expand`] runs a program's macros,
+//! repeats and conditionals, and, with the `ir` feature, `lower` turns each
+//! line it hands over into `asm198x-ir` statements. The Asm198x back end lays
+//! them out and assembles them. A dialect is supported once that path
+//! produces the same bytes as the real assembler across its recorded
+//! verdicts.
 //!
-//! The crate is at an early stage. The first profile is PasmoNext 0.1.3, which
-//! the 198x curriculum builds with, and [`lex`] splits its source into tokens.
-//! The parser follows the plan in `docs/plans/`.
+//! The first profile is PasmoNext 0.1.3, which the 198x curriculum builds
+//! with. The work follows the plan in `docs/plans/`.
 
 pub mod ast;
 pub mod expand;
