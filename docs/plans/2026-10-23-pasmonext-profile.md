@@ -272,32 +272,21 @@ Design agreed 2026-10-23.
     the label. An `(IX+d)` displacement is a signed byte.
   - **Directives:** all of PasmoNext 0.1.3, not only those the curriculum
     uses. See *5c, the whole of PasmoNext* below.
-  - **The layout host:** `Layout` implements the expander's `Host`. It lowers
-    each line as the expander hands it over and keeps PasmoNext's first-pass
-    view: the address, advanced by `asm198x-ir`'s own `next_pc` so sizes have
-    one source, and the symbols so far (labels, `EQU`, and `DEFL`, which may
-    change). `IF` conditions and `REPT` counts are evaluated with
-    `asm198x-ir`'s `Expr::eval` against that view. A name defined further on
-    is an error, as in PasmoNext.
-  - **Spans:** each statement's file, line and operand position come from
-    tracing its provenance to the text a person wrote. Its expansion frames
-    come from the call sites around it, innermost first.
-  - **The entry point:** `lower(program, profile, cpu, binaries)`, where
-    `binaries` loads `INCBIN` files. It returns the statements, the
-    diagnostics and the provenance.
+  - **The line:** `lower::line` lowers one line the expander hands over:
+    its label and its instruction or directive, each to its IR operation,
+    with the quirks it applied. It folds only what PasmoNext needs known when
+    the line is read (see *The boundary* below) and asks a caller's `Known`
+    for those values. Everything else stays symbolic, for the engine.
+  - **Spans:** `Program::locate` turns a line's span into the file, line
+    and column a person wrote, by tracing its provenance, and lists the
+    macro, `REPT` and `IRP` calls around it, innermost first.
 - **Verified by:**
   - **Expressions:** all 107 expressions measured on PasmoNext, lowered and
     evaluated by `asm198x-ir`, give PasmoNext's values.
   - **Instructions and directives:** unit tests of the form each one chooses,
     including every `isa198x` Z80 form and the Next forms.
-  - **Checked outside the tests,** since Asm198x has no public API that
-    assembles a statement stream:
-    - **Layout:** `Layout`'s symbols match the symbol table PasmoNext writes
-      (its third argument) for all 391 curriculum programs.
-    - **Bytes:** a throwaway encoder in a scratch folder turns the statements
-      into bytes with `isa198x`'s forms, compared with PasmoNext's output for
-      the same programs. It is not committed: the byte gate belongs to Asm198x
-      in step 6, and Lang198x owns no assembler.
+  - **Bytes and symbols:** in Asm198x, through its PasmoNext walk (step 6),
+    against PasmoNext's recorded verdicts. Lang198x owns no assembler.
   - **CI:** Clippy, tests and coverage run with all features, through the
     shared workflow's `all-features` input. A job checks that the default
     build's `cargo tree` has no `asm198x-ir` or `isa198x`, so the separation
@@ -393,12 +382,10 @@ Design agreed 2026-10-23.
     files (`--public`, `--cspecsymbols`, `--err`, `--snasmerrors`).
   - **Still to build, in this order, each measured on PasmoNext first and
     with its IR operation checked; a gap in `asm198x-ir` is filed there:**
-    1. **The pass loop, the layout host, spans and the entry point,**
-       with `ORG`, `EQU`, `DEFL`, `DEFB`/`DB`/`DEFM`, `DEFW`/`DW`,
-       `DEFS`/`DS`, `ALIGN`, `INCBIN` and `END`, the symbol rules
-       (`setequorlabel`, `setdefl`) and `--pass3`. See *The pass loop*
-       below; earlier passes' leftover bytes follow in a pull request of
-       their own.
+    1. **`lower::line` and `Program::locate`,** with `ORG`, `EQU`,
+       `DEFL`, `DEFB`/`DB`/`DEFM`, `DEFW`/`DW`, `DEFS`/`DS`, `ALIGN`,
+       `INCBIN` and `END`. The symbol rules and `--pass3` belong to the
+       walk in Asm198x (step 6).
     2. **Scopes:** `LOCAL`, `PROC`/`ENDP` and `PUBLIC`, with the options
        `--alocal` (automatic locals), `--nocase` and `--equ`/`-E`
        (predefined symbols); `-I` is the caller's include search.
@@ -408,39 +395,46 @@ Design agreed 2026-10-23.
     5. **The Next's banks:** `SETBANK`, `SAVEBIN` and `??` in expressions.
     6. **Reading options:** `--bracket` (only brackets are indirection) and
        `--w8080` (warnings for what the 8080 lacks).
-    7. **`--86`, last:** PasmoNext's translation of Z80 source into 8086
+    7. **Three-pass mode,** in Asm198x's walk: see *The boundary* below.
+    8. **`--86`, last:** PasmoNext's translation of Z80 source into 8086
        code. Asm198x has no verdicts for it, so they are recorded first.
-- **The pass loop (agreed 2026-10-23).** PasmoNext reads every line more
-  than once, and each pass inherits the last one's symbols, so `IF`, `REPT`
-  and macros are decided again on every pass. Measured:
-  - `x equ later` then `rept x`: pass 1 sees `x` as 0 and repeats nothing;
-    pass 2 repeats twice. The output is pass 2's.
-  - It is "until stable, with a cap": two passes, and a third only if a
-    symbol's value changed in the second (`setvar`: "Switching to 3 pass
-    mode"); a change in the third is "Phase error". `--pass3` starts with
-    three.
-  - Bytes written by an earlier pass stay where a later pass writes
-    nothing: `x equ later`, `org x`, `db 1`, `later equ 5` gives
-    `01 00 00 00 00 01`.
-
-  Most assemblers run passes, and they differ in exactly these answers, so
-  the loop is one mechanism and each profile gives its answers. Each is
-  measured on the reference tool:
-  - **The cap and what happens at it.** PasmoNext: two, three on a change,
-    then "Phase error". A one-pass assembler with a linker, such as ca65 or
-    rgbasm, has a cap of one.
-  - **What an unknown symbol is worth in an early pass.** PasmoNext: 0.
-  - **Which contexts need a symbol defined first.** PasmoNext: `ORG`, `IF`,
-    `REPT`, the `DS` count, `RST`, `IM`, Next `push nn`, `add rr,nn`,
-    `nextreg`'s register and `test`. A symbol defined with a value of 0 from
-    pass 1 is enough.
-  - **Whether earlier passes' bytes survive.** PasmoNext: yes.
-
-  Only what PasmoNext needs is built now, shaped so SjASMPlus slots in. The
-  split with Asm198x's engine stays clear: the front end decides which
-  lines exist, pass by pass, and the engine gives them their values.
+- **The boundary (amended 2026-10-23).** An earlier version of this plan put
+  a layout host and a pass loop in z80-asm. That made z80-asm do layout to
+  decide `IF` and `REPT`, and Asm198x do it again to make the bytes, and
+  every complication came from the duplicate: earlier passes' values and
+  leftover bytes, and who computes which. The umbrella decision already says
+  the migration is "not a move of `isa198x`, the encoder, layout, linking or
+  artifacts". So the layout host is Asm198x's, and Steve agreed the change:
+  - **z80-asm** parses, expands and lowers one line at a time. It does no
+    layout, runs no passes and computes no bytes.
+  - **Asm198x** has a PasmoNext walk, like its SjASMPlus walk
+    (`decisions/forward-conditions-and-passes.md` there). It implements the
+    expander's `Host` and lowering's `Known`, runs PasmoNext's passes with a
+    fresh expander each time, keeps the symbols and the address with
+    `engine::next_pc`, and hands the final pass's statements to the engine.
+  - **What PasmoNext 0.1.3 does,** measured, for the walk to follow: two
+    passes, each starting with the last one's symbols, `DEFL` names and
+    macros cleared. An unknown name reads as 0 in pass 1 and is an error
+    after. `ORG`, `IF`, `REPT`, the `DS` count, `RST`, `IM`, Next
+    `push nn`, `add rr,nn`, `nextreg`'s register and `test` need the name
+    defined earlier, or in an earlier pass. `DEFINED` is true for a name
+    defined above in this pass.
+  - **Three-pass mode is its own item.** PasmoNext adds a third pass when a
+    symbol changes in the second ("Switching to 3 pass mode"), and stops with
+    "Phase error" if one changes again. Only then can an earlier pass's
+    bytes survive, or the last pass read a value no later pass set. No
+    curriculum program (0 of 391) and no verdict source (0 of 1,230) does
+    this. Until the item is built, the walk reports it by name rather than
+    guessing.
+  - **One `asm198x-ir`:** z80-asm asks for `asm198x-ir >=0.0.72, <0.1`, and
+    Asm198x patches crates.io's `asm198x-ir` to its own workspace crate, so
+    both sides share one copy and Asm198x can release without waiting for
+    z80-asm.
+  - **Publishing:** `lang198x-z80-asm` is `publish = false` until its first
+    release, which is made by hand before crates.io's trusted publishing can
+    take over. That first publish is Steve's to run.
 - **Pull requests:** 5a, the feature, CI and expressions; 5b, instructions;
-  5c, directives, the layout host, spans and the entry point.
+  5c, one per item in the list above.
 - **As built, 5a:** the `ir` feature, CI's all-features runs and the
   separation job, and `lower::expr`.
   - **PasmoNext's arithmetic, read from its source:** values are
@@ -464,6 +458,9 @@ Design agreed 2026-10-23.
 ### 6. The gate, in Asm198x
 
 Pull requests to `asm198x/asm198x`, after publishing `lang198x-z80-asm`.
+
+- **The walk:** Asm198x's PasmoNext walk, described in *The boundary* above,
+  with its own plan and decision record in Asm198x.
 
 - **Round trip first:** every `pasmo` and `pasmonext` verdict source, and every
   curriculum program, parses and comes back byte for byte.
