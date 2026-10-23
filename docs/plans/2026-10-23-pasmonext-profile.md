@@ -307,8 +307,8 @@ Design agreed 2026-10-23.
     cannot quietly erode.
   - **Mutations and fuzzing:** a deliberate break per rule, and a `lower` fuzz
     target.
-- **5b, measured before it was designed (proposed 2026-10-23, awaiting
-  approval).**
+- **5b, measured before it was designed (agreed 2026-10-23).** This
+  replaces the instruction bullet above where they differ.
   - **The sweep:** every one of PasmoNext's 91 mnemonics with 0, 1 or 2
     operands from a fixed vocabulary of 55 (registers, conditions, indirect
     and indexed forms in parentheses and brackets, values), 280,371 lines,
@@ -334,7 +334,7 @@ Design agreed 2026-10-23.
     - **`isa198x` gaps:** `sll (ix+d)`, Z80N `jp (c)`, `mirror de`,
       `ldirscale` and `popx` assemble on PasmoNext and have no `isa198x`
       form.
-  - **Proposed:** keep the agreed matcher, emitting `Operation::Instruction`
+  - **Agreed:** keep the agreed matcher, emitting `Operation::Instruction`
     with an `isa198x` form, and add the measured rules above as exceptions,
     each citing the PasmoNext routine that causes it. Lines with no form
     (the missing-displacement miscompiles, little-endian `push nn`, the
