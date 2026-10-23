@@ -43,7 +43,7 @@ pub(crate) struct Problem {
 }
 
 impl Problem {
-    fn at(node: &impl View, message: impl Into<String>) -> Self {
+    pub(crate) fn at(node: &impl View, message: impl Into<String>) -> Self {
         Self {
             range: node.syntax().text_range(),
             message: message.into(),
