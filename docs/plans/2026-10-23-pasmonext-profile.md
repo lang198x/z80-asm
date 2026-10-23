@@ -1,6 +1,6 @@
 # Plan: the Z80 family parser with a PasmoNext profile
 
-**Status:** Agreed 2026-10-23. Steps 1 and 2 are done.
+**Status:** Agreed 2026-10-23. Steps 1 to 3 are done.
 **Binding records:** Lang198x's
 [shared syntax layer decision](https://github.com/lang198x/lang198x/blob/main/decisions/shared-syntax-layer.md)
 and 198x's
@@ -97,12 +97,21 @@ coverage floor on its own.
     sources are written for RGBDS, and the parser rejects them, as PasmoNext
     does.
 
-### 3. Typed views
+### 3. Typed views (done)
 
 - **Files:** `crates/z80-asm/src/ast.rs`, or one module per view.
 - **What:** thin views such as `Line`, `Label`, `Instruction`, `Operand`,
   `Expr` and `Directive`, written by hand over the tree.
 - **Verified by:** unit tests on parsed source, including broken lines.
+- **As built:** `ast` holds one small module each for lines, statements,
+  operands and expressions, over a `View` trait with `cast` and `syntax`.
+  - **Views are structural.** An operator is its token, and deciding that
+    `AND` and `&` mean the same thing is lowering's job.
+  - **Every part is optional,** because broken lines lack parts.
+  - **Checked by value:** a second evaluator, written over the views, must
+    give PasmoNext's value for all 93 measured expressions, the same table
+    the parser's tests use. Three deliberately wrong accessors are each
+    caught.
 
 ### 4. Preprocessing
 
