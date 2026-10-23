@@ -270,11 +270,8 @@ Design agreed 2026-10-23.
     form. Each operand offers the form labels it could fill, tried in order.
     `RST`, `IM` and the bit number of `BIT`, `RES` and `SET` are folded into
     the label. An `(IX+d)` displacement is a signed byte.
-  - **Directives:** each one the curriculum or the `pasmo` and `pasmonext`
-    verdict corpus uses becomes its IR operation: `ORG`, `EQU`, `DEFL`, the
-    data directives, `DS`, `INCBIN`, `END` and the Next directives in use.
-    Any other directive is reported as not lowered yet, by name, rather than
-    guessed.
+  - **Directives:** all of PasmoNext 0.1.3, not only those the curriculum
+    uses. See *5c, the whole of PasmoNext* below.
   - **The layout host:** `Layout` implements the expander's `Host`. It lowers
     each line as the expander hands it over and keeps PasmoNext's first-pass
     view: the address, advanced by `asm198x-ir`'s own `next_pc` so sizes have
@@ -379,6 +376,38 @@ Design agreed 2026-10-23.
     fourteenth showed a rule the matcher already covers, which was removed.
   - **Found in `isa198x`:** five forms PasmoNext assembles that it lacks
     (isa198x/isa198x#37); lowering builds them as pieces until it has them.
+- **5c, the whole of PasmoNext (agreed 2026-10-23).** An earlier draft
+  lowered only the directives the curriculum and the verdict corpus use and
+  reported the rest as "not lowered yet". Steve rejected that: it ignores what
+  this work is for. Someone else's PasmoNext source can use anything
+  PasmoNext has, a port of the curriculum must not hit a gap, and reference
+  parity means all of it. So 5c covers every feature of PasmoNext 0.1.3 that
+  reads or assembles source, inventoried from its dispatchers (`parsegeneric`
+  and the first-pass line switch in `asm.cpp`) and its options (`pasmo.cpp`).
+  - **Already built:** lexing, numbers, strings and expressions (steps 1, 2
+    and 5a); instructions (5b); `INCLUDE`, `IF`/`ELSE`/`ENDIF`, `MACRO`,
+    `ENDM`, `EXITM`, `.SHIFT`, `REPT`, `IRP` and the stop at `END` (step 4).
+  - **Asm198x's, not ours:** output formats (`--bin`, `--tap`, `--tzx`,
+    `--cdt`, `--plus3dos`, `--amsdos`, `--msx`, `--prl`, `--cmd`, `--hex`,
+    `--sna` and the `bas` variants) and the formats of symbol and error
+    files (`--public`, `--cspecsymbols`, `--err`, `--snasmerrors`).
+  - **Still to build, in this order, each measured on PasmoNext first and
+    with its IR operation checked; a gap in `asm198x-ir` is filed there:**
+    1. **The layout host, spans and the entry point,** with `ORG`, `EQU`,
+       `DEFL`, `DEFB`/`DB`/`DEFM`, `DEFW`/`DW`, `DEFS`/`DS`, `ALIGN`,
+       `INCBIN` and `END`, and the symbol rules (`setequorlabel`,
+       `setdefl`).
+    2. **Scopes:** `LOCAL`, `PROC`/`ENDP` and `PUBLIC`, with the options
+       `--alocal` (automatic locals), `--nocase` and `--equ`/`-E`
+       (predefined symbols); `-I` is the caller's include search.
+    3. **Structures:** `STRUCT`/`ENDS`, `RB`, `RW`, `RSSET` and `STACK`.
+    4. **Messages:** `.ERROR`, `.WARNING`, `MESSAGE` and `HEX`; `FMESSAGE`
+       is a keyword PasmoNext never dispatches, so it is rejected.
+    5. **The Next's banks:** `SETBANK`, `SAVEBIN` and `??` in expressions.
+    6. **Reading options:** `--bracket` (only brackets are indirection) and
+       `--w8080` (warnings for what the 8080 lacks).
+    7. **`--86`, last:** PasmoNext's translation of Z80 source into 8086
+       code. Asm198x has no verdicts for it, so they are recorded first.
 - **Pull requests:** 5a, the feature, CI and expressions; 5b, instructions;
   5c, directives, the layout host, spans and the entry point.
 - **As built, 5a:** the `ir` feature, CI's all-features runs and the
