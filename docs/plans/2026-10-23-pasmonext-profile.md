@@ -307,6 +307,51 @@ Design agreed 2026-10-23.
     cannot quietly erode.
   - **Mutations and fuzzing:** a deliberate break per rule, and a `lower` fuzz
     target.
+- **5b, measured before it was designed (proposed 2026-10-23, awaiting
+  approval).**
+  - **The sweep:** every one of PasmoNext's 91 mnemonics with 0, 1 or 2
+    operands from a fixed vocabulary of 55 (registers, conditions, indirect
+    and indexed forms in parentheses and brackets, values), 280,371 lines,
+    each assembled by PasmoNext 0.1.3. It accepted 2,437.
+  - **The agreed matcher, simulated:** try each operand's `isa198x` labels in
+    order and take the first form that exists. It agrees with PasmoNext on
+    1,640 lines, gives different bytes on 8, misses 789 and wrongly accepts
+    27.
+  - **The difference is about 15 rules, not 789 cases:**
+    - **Lenient spellings that give the right code:** a parenthesised value
+      where no `(n)` form exists is just a value (`ld b,(12h)` is
+      `LD B,12h`; `jp nz,(12h)`, `ld (hl),(12h)`, `djnz (12h)`); `ret`
+      swallows one token (`ret a` is `RET`); Next `push n,` ignores the
+      rest of the line.
+    - **Silent miscompiles of invalid source:** `adc hl,nn`, `sbc hl,nn`,
+      `add ix,nn` and `add iy,nn` give `ED 34` (Next `ADD HL,nn`);
+      `adc hl,a`, `sbc hl,a` and `add ix,a` give `ED 31`; `ld bc,sp` and
+      its kin give `ED 25`; `ld h,ixh` gives `LD IXH,IXH`; `ld (hl),ixh` and
+      the bit and rotate instructions on `ixh` give indexed opcodes with no
+      displacement byte.
+    - **Next:** `push nn` is little-endian; some Next operands refuse `$`;
+      `mul d,e` is refused (only `mul`).
+    - **`isa198x` gaps:** `sll (ix+d)`, Z80N `jp (c)`, `mirror de`,
+      `ldirscale` and `popx` assemble on PasmoNext and have no `isa198x`
+      form.
+  - **Proposed:** keep the agreed matcher, emitting `Operation::Instruction`
+    with an `isa198x` form, and add the measured rules above as exceptions,
+    each citing the PasmoNext routine that causes it. Lines with no form
+    (the missing-displacement miscompiles, little-endian `push nn`, the
+    `isa198x` gaps until they are filled) become `ComputedInstruction`
+    pieces. A miscompile keeps PasmoNext's bytes, for the gate, and adds a
+    warning that names what PasmoNext really assembled.
+  - **Rejected alternative:** porting PasmoNext's instruction routines
+    (`asm.cpp` lines 3751 to about 6600, around 60 routines) and emitting
+    pieces for everything. It reproduces every quirk by construction,
+    including outside the vocabulary, but it is several times the code, it
+    copies a large amount of 8086 and listing logic that has to be read
+    around, and Asm198x would have to time every Z80 instruction from its
+    bytes.
+  - **Verified by:** the whole sweep as a test. Every accepted line gives
+    PasmoNext's bytes and every other vocabulary line is rejected, plus the
+    823 `isa198x` forms measured earlier. The vocabulary, the 2,437 accepted
+    lines and the script that measured them are committed as test data.
 - **Pull requests:** 5a, the feature, CI and expressions; 5b, instructions;
   5c, directives, the layout host, spans and the entry point.
 - **As built, 5a:** the `ir` feature, CI's all-features runs and the
