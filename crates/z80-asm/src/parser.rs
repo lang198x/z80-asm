@@ -331,7 +331,11 @@ impl Parser<'_> {
     }
 
     /// Operands separated by commas. An instruction operand that starts with
-    /// `(`, or `[` if the profile allows it, is an indirection.
+    /// `(`, or `[` if the profile allows it, is an indirection, unless more of
+    /// the operand follows the closing `)`: then the parentheses group an
+    /// expression, as in `ld b,(1)+1`. PasmoNext reads such an operand again
+    /// as an expression wherever the instruction has no memory form for it;
+    /// lowering rejects it where it has.
     fn operands(&mut self, instruction: bool) {
         if self.at_line_end() {
             return;
@@ -340,7 +344,7 @@ impl Parser<'_> {
             self.trivia();
             self.builder.start_node(kinds::OPERAND);
             let opens = match self.current() {
-                Some(kinds::L_PAREN) => true,
+                Some(kinds::L_PAREN) => !self.group_continues(),
                 Some(kinds::L_BRACK) => self.profile.grammar.bracket_indirection,
                 _ => false,
             };
@@ -370,6 +374,33 @@ impl Parser<'_> {
             self.missing("expected a name after `??`");
         }
         self.builder.finish_node();
+    }
+
+    /// Whether the parenthesised group starting here is followed by more of
+    /// the same operand, rather than a comma or the end of the line.
+    fn group_continues(&self) -> bool {
+        let mut depth = 0usize;
+        let mut index = self.pos;
+        while let Some(&kind) = self.kinds.get(index) {
+            match kind {
+                kinds::L_PAREN => depth += 1,
+                kinds::R_PAREN => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                SyntaxKind::COMMENT | SyntaxKind::NEWLINE => return false,
+                _ => {}
+            }
+            index += 1;
+        }
+        let after =
+            (index + 1..self.kinds.len()).find(|&i| self.kinds[i] != SyntaxKind::WHITESPACE);
+        !matches!(
+            after.map(|i| self.kinds[i]),
+            None | Some(kinds::COMMA | SyntaxKind::COMMENT | SyntaxKind::NEWLINE)
+        )
     }
 
     /// `(address)`, `(register)` or `(ix+d)`, or the same in brackets. It

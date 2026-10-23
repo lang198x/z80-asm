@@ -57,7 +57,7 @@ fn a_spectrum_program_with_macros_and_indexes() {
 fn broken_lines_stay_in_the_tree() {
     let problems = snapshot(
         "parse-errors.tree",
-        "ld a,(2)*3\ndb 1,\n5 nop\ndw 2 * -3\nfoo:: nop\n",
+        "ld a,[2]*3\ndb 1,\n5 nop\ndw 2 * -3\nfoo:: nop\n",
     );
     assert_eq!(
         problems,
