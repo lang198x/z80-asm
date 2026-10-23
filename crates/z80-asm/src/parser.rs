@@ -25,6 +25,14 @@
 //!   The lexer's complaints inside either do not count.
 //! - Macro arguments are text, split at every comma outside a string.
 //!
+//! A file parsed on its own cannot know the macros its includes define. A
+//! line such as `border white` might be the label `border` then a call to
+//! `white`, or a call to an included macro `border`. Before any `INCLUDE`,
+//! PasmoNext's single pass makes it a label. After one, the parser still reads
+//! it as a label, but reports an *unknown* diagnostic, because the file alone
+//! cannot decide. [`parse_with_macros`] takes the names a caller already
+//! knows, so a reading of the whole program has no such lines.
+//!
 //! The parser checks every line. PasmoNext does not check the syntax of lines
 //! after `END`, inside a false `IF` or inside a macro body, though it still
 //! lexes them; deciding which lines count is the job of preprocessing.
@@ -88,6 +96,35 @@ impl std::error::Error for ParseError {}
 /// Fails only when no tree can be built at all, which needs text longer than
 /// 4 GiB.
 pub fn parse(text: &str, profile: Profile) -> Result<Parse, ParseError> {
+    parse_with_macros(text, profile, std::iter::empty::<String>())
+}
+
+/// Parses `text` like [`parse`], knowing that `macros` are already defined.
+///
+/// Use this for text that follows macro definitions elsewhere: a file read in
+/// by `INCLUDE`, or a macro body being expanded. Names are case-sensitive, as
+/// in PasmoNext.
+///
+/// ```
+/// use lang198x_z80_asm::ast::{SourceFile, Statement, View};
+/// use lang198x_z80_asm::{Profile, parse_with_macros};
+///
+/// let parse = parse_with_macros("border white\n", Profile::PASMONEXT_0_1_3, ["border"])?;
+/// let file = SourceFile::cast(parse.tree().root()).expect("a source file");
+/// let line = file.lines().next().expect("one line");
+/// assert!(line.label().is_none());
+/// assert!(matches!(line.statement(), Some(Statement::MacroCall(_))));
+/// # Ok::<(), lang198x_z80_asm::ParseError>(())
+/// ```
+///
+/// # Errors
+///
+/// As for [`parse`].
+pub fn parse_with_macros<I, S>(text: &str, profile: Profile, macros: I) -> Result<Parse, ParseError>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
     let lexed = lex(text, profile);
     let mut starts = Vec::with_capacity(lexed.tokens().len() + 1);
     let mut offset = 0;
@@ -106,7 +143,8 @@ pub fn parse(text: &str, profile: Profile) -> Result<Parse, ParseError> {
         diagnostics: Vec::new(),
         raw: Vec::new(),
         profile,
-        macros: HashSet::new(),
+        macros: macros.into_iter().map(Into::into).collect(),
+        after_include: false,
     };
     parser.source_file();
     let Parser {
@@ -143,8 +181,12 @@ struct Parser<'t> {
     /// Where raw text and unquoted file names are.
     raw: Vec<TextRange>,
     profile: Profile,
-    /// Macro names this file has defined so far. Names are case-sensitive.
+    /// Macro names known so far: given by the caller, or defined above in
+    /// this file. Names are case-sensitive.
     macros: HashSet<String>,
+    /// Whether an `INCLUDE` has been read, so a macro might be defined that
+    /// this text cannot see.
+    after_include: bool,
 }
 
 impl Parser<'_> {
@@ -186,6 +228,16 @@ impl Parser<'_> {
         if !colon && (self.is_keyword(&word) || self.starts_macro_call(&word)) {
             return None;
         }
+        if !colon && self.after_include && self.could_be_hidden_call() {
+            let start = self.offset(self.pos);
+            let message = format!(
+                "`{word}` is read as a label, but if an included file defines it as a macro, \
+                 this line calls it"
+            );
+            let range = self.range(start, start + word.len());
+            self.diagnostics
+                .push(Diagnostic::new(DiagnosticKind::Unknown, range, message));
+        }
         self.builder.start_node(kinds::LABEL);
         self.bump();
         if colon {
@@ -193,6 +245,21 @@ impl Parser<'_> {
         }
         self.builder.finish_node();
         Some(word)
+    }
+
+    /// Whether the line, whose first word is an unknown name without a colon,
+    /// would read differently if that name were a macro: it is alone, or
+    /// followed by another name that is not an instruction, directive or
+    /// known macro.
+    fn could_be_hidden_call(&self) -> bool {
+        match self.peek_nth(1) {
+            None | Some(SyntaxKind::COMMENT | SyntaxKind::NEWLINE) => true,
+            Some(kinds::IDENT) => {
+                let next = self.nth_index(1).map_or("", |i| self.text_at(i));
+                !self.is_keyword(next) && !self.macros.contains(next)
+            }
+            Some(_) => false,
+        }
     }
 
     /// Whether `word`, the first on its line, calls a macro. It does if this
@@ -223,6 +290,10 @@ impl Parser<'_> {
             match directive.operands {
                 Operands::Expressions => self.operands(false),
                 Operands::FileName => self.file_name(),
+                Operands::Include => {
+                    self.file_name();
+                    self.after_include = true;
+                }
                 Operands::Text => self.text(),
                 Operands::MacroHeader => {
                     // `name MACRO params` names the macro with its label, and

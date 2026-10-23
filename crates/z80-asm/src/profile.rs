@@ -97,6 +97,10 @@ pub(crate) enum Operands {
     /// A file name, such as `INCLUDE`'s: a string, or the text up to the
     /// next space.
     FileName,
+    /// A file whose text is read in at this point, such as `INCLUDE`'s. It is
+    /// written like [`Operands::FileName`], but what follows it may use
+    /// macros the file defines.
+    Include,
     /// Free text to the end of the line, comments included, such as
     /// `.ERROR`'s message.
     Text,
@@ -208,7 +212,7 @@ const PASMONEXT_DIRECTIVES: &[Directive] = &[
     directive("DEFS", Operands::Expressions),
     directive("DS", Operands::Expressions),
     directive("ALIGN", Operands::Expressions),
-    directive("INCLUDE", Operands::FileName),
+    directive("INCLUDE", Operands::Include),
     directive("INCBIN", Operands::FileName),
     directive("IF", Operands::Expressions),
     directive("ELSE", Operands::Expressions),
