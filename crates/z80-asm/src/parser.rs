@@ -491,6 +491,16 @@ impl Parser<'_> {
                 self.expect(kinds::R_PAREN, "expected `)`");
                 self.builder.finish_node();
             }
+            Some(kinds::IDENT) if self.at_word(self.profile.grammar.nul) => {
+                // `NUL` reads the rest of the line, as PasmoNext does: in
+                // `db nul ,1` the comma and the 1 belong to it.
+                self.builder.start_node(kinds::NUL_EXPR);
+                self.bump();
+                while !self.at_line_end() {
+                    self.bump_next();
+                }
+                self.builder.finish_node();
+            }
             Some(kinds::IDENT) if self.at_word(self.profile.grammar.defined) => {
                 self.builder.start_node(kinds::DEFINED_EXPR);
                 self.bump();

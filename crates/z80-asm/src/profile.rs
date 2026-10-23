@@ -77,6 +77,10 @@ pub(crate) struct Grammar {
     pub(crate) conditional: bool,
     /// The word that asks whether a name is defined, such as `DEFINED`.
     pub(crate) defined: Option<&'static str>,
+    /// The word that asks whether the rest of the line is empty, such as
+    /// `NUL`. It takes everything after it, commas included, up to any
+    /// comment.
+    pub(crate) nul: Option<&'static str>,
     /// Registers that take a signed displacement inside parentheses, such as
     /// `ix` in `(ix+5)`. Matching ignores case.
     pub(crate) index_registers: &'static [&'static str],
@@ -274,6 +278,7 @@ impl Profile {
             levels: PASMONEXT_LEVELS,
             conditional: true,
             defined: Some("DEFINED"),
+            nul: Some("NUL"),
             index_registers: &["ix", "iy"],
         },
     };

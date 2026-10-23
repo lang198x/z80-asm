@@ -2,7 +2,7 @@
 
 use lang198x_syntax::{SyntaxNode, SyntaxToken};
 
-use super::{View, child, child_tokens, children, view};
+use super::{View, child, child_nodes, child_tokens, children, view};
 use crate::kinds;
 
 /// An expression.
@@ -22,6 +22,8 @@ pub enum Expr {
     Conditional(CondExpr),
     /// `DEFINED name`.
     Defined(DefinedExpr),
+    /// `NUL` and the rest of the line.
+    Nul(NulExpr),
 }
 
 impl View for Expr {
@@ -34,6 +36,7 @@ impl View for Expr {
             kinds::BIN_EXPR => Self::Binary(BinExpr(node)),
             kinds::COND_EXPR => Self::Conditional(CondExpr(node)),
             kinds::DEFINED_EXPR => Self::Defined(DefinedExpr(node)),
+            kinds::NUL_EXPR => Self::Nul(NulExpr(node)),
             _ => return None,
         })
     }
@@ -47,6 +50,7 @@ impl View for Expr {
             Self::Binary(view) => view.syntax(),
             Self::Conditional(view) => view.syntax(),
             Self::Defined(view) => view.syntax(),
+            Self::Nul(view) => view.syntax(),
         }
     }
 }
@@ -175,5 +179,19 @@ impl DefinedExpr {
     #[must_use]
     pub fn name(&self) -> Option<NameRef> {
         child(&self.0)
+    }
+}
+
+view! {
+    /// `NUL` and everything after it on the line.
+    NulExpr, kinds::NUL_EXPR
+}
+
+impl NulExpr {
+    /// Returns whether anything follows `NUL` on the line. `NUL` is true
+    /// only when nothing does.
+    #[must_use]
+    pub fn has_rest(&self) -> bool {
+        child_tokens(&self.0).nth(1).is_some() || child_nodes(&self.0).next().is_some()
     }
 }

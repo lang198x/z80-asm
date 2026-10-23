@@ -316,6 +316,19 @@ fn known_macro_names_are_case_sensitive() {
 }
 
 #[test]
+fn nul_takes_the_rest_of_the_line_commas_included() {
+    // PasmoNext 0.1.3 assembles `db nul ,1` to one byte, 00.
+    assert_eq!(
+        line("db nul ,1 ; c"),
+        "(LINE (DIRECTIVE db (OPERAND (NUL_EXPR nul , 1))) ; c)"
+    );
+    assert_eq!(
+        line("db NUL"),
+        "(LINE (DIRECTIVE db (OPERAND (NUL_EXPR NUL))))"
+    );
+}
+
+#[test]
 fn a_question_mark_touching_a_name_character_starts_a_name() {
     // PasmoNext reads `1?2:3` as `1` then the name `?2`, and rejects it.
     assert_eq!(
@@ -438,6 +451,7 @@ fn eval(node: &SyntaxNode) -> u32 {
             1
         }
         kinds::DEFINED_EXPR => truth(node.text().to_ascii_lowercase().ends_with("foo")),
+        kinds::NUL_EXPR => truth(tokens.len() == 1),
         kinds::PAREN_EXPR => eval(&nodes[0]),
         kinds::COND_EXPR => {
             if eval(&nodes[0]) != 0 {
