@@ -17,8 +17,11 @@
 //! the 198x curriculum builds with, and [`lex`] splits its source into tokens.
 //! The parser follows the plan in `docs/plans/`.
 
+pub mod ast;
 pub mod kinds;
 mod lexer;
+#[cfg(test)]
+mod measured;
 mod parser;
 mod profile;
 

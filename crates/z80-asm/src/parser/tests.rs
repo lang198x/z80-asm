@@ -4,6 +4,7 @@ use lang198x_syntax::{SyntaxElement, SyntaxNode};
 use proptest::prelude::*;
 
 use super::*;
+use crate::measured::{EXPRESSIONS, REJECTED};
 
 fn parsed(text: &str) -> Parse {
     parse(text, Profile::PASMONEXT_0_1_3).expect("short text always parses")
@@ -227,6 +228,17 @@ fn file_names_are_strings_or_run_to_the_next_space() {
 }
 
 #[test]
+fn a_question_mark_touching_a_name_character_starts_a_name() {
+    // PasmoNext reads `1?2:3` as `1` then the name `?2`, and rejects it.
+    assert_eq!(
+        problems("dw 1?2:3"),
+        ["4..8 expected `,` or the end of the line"]
+    );
+    assert!(problems("dw 1? 2 : 3").is_empty());
+    assert!(problems("dw 1 ? 2:3").is_empty());
+}
+
+#[test]
 fn missing_and_extra_operands_are_reported() {
     assert_eq!(problems("ld a,"), ["5..5 expected a value"]);
     assert_eq!(problems("db 1,"), ["5..5 expected a value"]);
@@ -407,107 +419,9 @@ fn value(expression: &str) -> Result<u16, Vec<String>> {
     Ok((eval(&expression) & 0xFFFF) as u16)
 }
 
-/// Every expression measured on PasmoNext 0.1.3, with the 16-bit value it
-/// assembled to.
-const MEASURED: &[(&str, u16)] = &[
-    ("1 + 2 * 3", 7),
-    ("2 * 3 + 1", 7),
-    ("8 - 2 - 1", 5),
-    ("16 / 4 / 2", 2),
-    ("7 MOD 4 * 2", 6),
-    ("7 % 4 * 2", 6),
-    ("2 * 7 MOD 4", 2),
-    ("1 << 2 + 1", 5),
-    ("1 + 1 << 2", 5),
-    ("16 >> 1 + 1", 9),
-    ("8 / 2 << 1", 8),
-    ("1 << 4 / 2", 8),
-    ("3 * 2 >> 1", 3),
-    ("12 >> 1 * 2", 12),
-    ("1 + 2 = 3", 0xFFFF),
-    ("1 = 1 + 0", 0xFFFF),
-    ("3 < 2 + 2", 0xFFFF),
-    ("2 > 1 = 1", 0),
-    ("2 < 3 < 1", 0),
-    ("1 < 2 = 0", 0),
-    ("0 = 1 < 2", 0xFFFF),
-    ("1 >= 1 = 1", 0),
-    ("2 EQ 2", 0xFFFF),
-    ("2 NE 2", 0),
-    ("1 LT 2", 0xFFFF),
-    ("1 GT 2", 0),
-    ("1 LE 1", 0xFFFF),
-    ("1 GE 2", 0),
-    ("1 OR 2 AND 0", 1),
-    ("1 OR 2 AND 2", 3),
-    ("1 | 2 & 0", 1),
-    ("6 XOR 3 AND 1", 7),
-    ("6 XOR 3 OR 1", 5),
-    ("1 OR 2 XOR 3", 0),
-    ("1 | 2 XOR 3", 0),
-    ("3 XOR 2 OR 1", 1),
-    ("1 = 1 AND 2", 2),
-    ("2 AND 1 = 1", 2),
-    ("1 & 2 = 2", 1),
-    ("1 AND 3 = 3", 1),
-    ("1 && 0 || 1", 0xFFFF),
-    ("1 || 0 && 0", 0xFFFF),
-    ("0 && 1 | 1", 0),
-    ("1 = 1 && 2 = 2", 0xFFFF),
-    ("1 && 2 XOR 2", 0),
-    ("2 XOR 2 && 1", 0),
-    ("NOT 0 AND 255", 255),
-    ("~0 AND 255", 255),
-    ("!0 AND 255", 255),
-    ("NOT 1 AND 3", 2),
-    ("! 1 AND 3", 0),
-    ("~ 1 AND 3", 2),
-    ("NOT 1 = 1", 0),
-    ("NOT 1 = 0", 0xFFFF),
-    ("!1 = 0", 0xFFFF),
-    ("!0 = 1", 0xFFFF),
-    ("~1 = 0", 0xFFFF),
-    ("~1 + 1", 0xFFFD),
-    ("-1 + 2", 0xFFFD),
-    ("- 1 = 1", 1),
-    ("- 2 * 3", 0xFFFA),
-    ("- 1 AND 3", 3),
-    ("- 4 >> 1", 0xFFFE),
-    ("2 AND -1", 2),
-    ("+ 5", 5),
-    ("- - 5", 5),
-    ("HIGH 1234h + 1", 0x12),
-    ("LOW 1234h + 1", 0x35),
-    ("HIGH (1234h + 100h)", 0x13),
-    ("HIGH 1234h SHL 1", 0x24),
-    ("HIGH 1234h SHL 4", 0x23),
-    ("LOW 1234h SHL 4", 0x40),
-    ("HIGH 100h = 1", 0),
-    ("high 1234h", 0x12),
-    ("1 ? 2 : 3", 2),
-    ("0 ? 2 : 3", 3),
-    ("1 ? 2 : 0 ? 4 : 5", 2),
-    ("0 ? 2 : 0 ? 4 : 5", 5),
-    ("1 + 1 ? 7 : 8", 7),
-    ("1 ? 2 + 1 : 3", 3),
-    ("1 OR 0 ? 7 : 8", 7),
-    ("0 OR 1 ? 7 : 8", 7),
-    ("- 1 ? 5 : 6", 5),
-    ("1 ? - 5 : 6", 0xFFFB),
-    ("1 SHL 2 SHL 1", 8),
-    ("1 shl 3", 8),
-    ("not 0 and 255", 255),
-    ("$ + 1", 1),
-    ("foo + 1", 2),
-    ("DEFINED foo", 0xFFFF),
-    ("DEFINED bar", 0),
-    ("DEFINED foo + 1", 0),
-    ("DEFINED foo AND 1", 1),
-];
-
 #[test]
 fn expressions_evaluate_as_pasmonext_measured() {
-    let wrong: Vec<String> = MEASURED
+    let wrong: Vec<String> = EXPRESSIONS
         .iter()
         .filter_map(|&(expression, expected)| match value(expression) {
             Ok(got) if got == expected => None,
@@ -521,18 +435,7 @@ fn expressions_evaluate_as_pasmonext_measured() {
 
 #[test]
 fn expressions_pasmonext_rejects_are_reported() {
-    for expression in [
-        "-2 * -3",
-        "2 + -3",
-        "2 - -3",
-        "2 = -3",
-        "2 << -1",
-        "2 * HIGH 300h",
-        "2 SHL HIGH 300h",
-        "2 = HIGH 300h",
-        "NOT 0 = NOT 0",
-        "DEFINED (foo)",
-    ] {
+    for &expression in REJECTED {
         assert!(
             value(expression).is_err(),
             "{expression} should be rejected"
