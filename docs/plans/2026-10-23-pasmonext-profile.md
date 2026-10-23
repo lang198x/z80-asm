@@ -421,3 +421,24 @@ its verdicts. Each starts in Asm198x: install the reference, record its
 verdicts, and give it a dialect name. The candidates and their suggested order
 are in the shared syntax layer decision. SjASMPlus migrates rather than
 starting fresh, because Asm198x already supports it.
+
+## Afterwards: porting the curriculum to another assembler
+
+A test of this work is whether it lets the curriculum's PasmoNext source be
+ported to another assembler. A porting tool is one of the tools this work
+leads to, though nothing commissions it yet. Steve noted the goal on
+2026-10-23, after the sweep showed how many quirks PasmoNext 0.1.3 has.
+PasmoNext is unmaintained: it has had no commits in eight years, and its
+issues are turned off.
+
+What this asks of the steps here:
+
+- **The tree stays the source of a port.** The lossless tree and provenance
+  let a porter rewrite source, with its macros, includes, conditionals,
+  comments and layout, instead of only the expanded program.
+- **Lowering names each quirk it applies,** as data, not only as warning
+  text, so a porter knows what to rewrite: `ld b,(12h)` must become
+  `ld b,12h` where parentheses mean memory, and `ret a` must become `ret`.
+- **A port is checked by bytes.** The original, assembled through this
+  profile, and the port, assembled through the target dialect, must give the
+  same bytes. That is the same gate as step 6, run between two dialects.
