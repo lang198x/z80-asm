@@ -352,6 +352,33 @@ Design agreed 2026-10-23.
     PasmoNext's bytes and every other vocabulary line is rejected, plus the
     823 `isa198x` forms measured earlier. The vocabulary, the 2,437 accepted
     lines and the script that measured them are committed as test data.
+- **As built, 5b:** `lower::instruction` and the `Cpu` option.
+  - **The rules, each from its PasmoNext routine:** `ret` swallows one token
+    (`parseRET`); Next `push nn` needs a number first and ignores the rest
+    (`parsePUSHPOP`); `jp (` is always an indirect jump (`parseJP_`); a
+    parenthesised value is a value only where no address fits
+    (`parsebyteparam` backtracking); 8-bit loads take a prefix from either
+    side (`parseLDsimple`); `ld rr,sp` is `ED 25` (`parseLDdouble`);
+    `add hl/ix/iy` and `adc/sbc hl` with `a` or a value are `ED 31` and
+    `ED 34` (`parseADDADCSBCHL`); `add bc/de` (`parseADDBCDE`), `nextreg`
+    and `test` check the first token's type; `mul` takes nothing; rotates and
+    bits on an index half drop the displacement (`dobyteparamCB`); the bit
+    number may come later and must be 0 to 7 (`dobit`); displacements follow
+    `parsedesp`'s limits. Values PasmoNext evaluates in its first pass (`rst`,
+    `im`, Next `push nn`, `add rr,nn`, `nextreg`'s register, `test`) must be
+    defined above.
+  - **Found on the way, fixed first, in the same pull request:** an operand
+    such as `(1)+1` is an expression where no address fits (`ld b,(1)+1` is
+    `06 02`), so the parser builds one and lowering rejects it where an
+    address fits.
+  - **Checked:** all 280,371 swept lines give PasmoNext's verdict and bytes,
+    through an encoder that follows Asm198x's engine; the plain Z80 accepts
+    exactly the non-Next lines; values defined further on, displacement
+    limits and grouping, each measured; miscompiles carry warnings and correct
+    lines do not. Fourteen deliberate breaks: thirteen are caught, and the
+    fourteenth showed a rule the matcher already covers, which was removed.
+  - **Found in `isa198x`:** five forms PasmoNext assembles that it lacks
+    (isa198x/isa198x#37); lowering builds them as pieces until it has them.
 - **Pull requests:** 5a, the feature, CI and expressions; 5b, instructions;
   5c, directives, the layout host, spans and the entry point.
 - **As built, 5a:** the `ir` feature, CI's all-features runs and the
