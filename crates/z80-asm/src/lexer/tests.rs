@@ -358,3 +358,98 @@ proptest! {
         }
     }
 }
+
+#[test]
+fn ampersand_o_and_x_are_octal_and_binary() {
+    for number in ["&O17", "&o17", "&X101", "&x11", "&X1$0"] {
+        assert_eq!(tokens(number), [format!("NUMBER {number}")], "{number}");
+        assert!(problems(number).is_empty(), "{number}");
+    }
+    // The tokenizer takes hexadecimal digits after the prefix, then rejects
+    // any outside its base, so these are one invalid number each.
+    for bad in ["&X102", "&O18", "&XG"] {
+        let len = if bad == "&XG" { 2 } else { bad.len() };
+        assert_eq!(
+            problems(bad),
+            [format!("0..{len} `{}` is not a valid number", &bad[..len])],
+            "{bad}"
+        );
+    }
+}
+
+#[test]
+fn a_prefixed_number_above_16_bits_is_out_of_range() {
+    for bad in [
+        "$10000",
+        "#10000",
+        "&10000",
+        "&H10000",
+        "&O200000",
+        "&X10000000000000000",
+        "%10000000000000000",
+        "$1$0000",
+        "$FFFFFFFFFFFFFFFFFFFFFFFF",
+    ] {
+        assert_eq!(tokens(bad), [format!("NUMBER {bad}")], "{bad}");
+        assert_eq!(
+            problems(bad),
+            [format!("0..{} `{bad}` is out of range", bad.len())],
+            "{bad}"
+        );
+    }
+    // The largest in range, and numbers that start with a digit, which keep
+    // their low 16 bits instead.
+    for fine in [
+        "$FFFF",
+        "#FFFF",
+        "&HFFFF",
+        "&O177777",
+        "%1111111111111111",
+        "65536",
+        "0x10000",
+        "10000h",
+        "200000o",
+        "18446744073709551616",
+    ] {
+        assert!(problems(fine).is_empty(), "{fine}");
+    }
+}
+
+#[test]
+fn numbers_have_the_values_pasmonext_assembled() {
+    // Each value was assembled by PasmoNext 0.1.3 with `dw`; it keeps the
+    // low 16 bits of a number that starts with a digit.
+    let rules = Profile::PASMONEXT_0_1_3.lexical;
+    for (text, expected) in [
+        ("65535", 0xFFFF),
+        ("65536", 0),
+        ("99999", 0x869F),
+        ("4294967296", 0),
+        ("10000h", 0),
+        ("1FFFFh", 0xFFFF),
+        ("$FFFF", 0xFFFF),
+        ("0x10000", 0),
+        ("%1111111111111111", 0xFFFF),
+        ("177777o", 0xFFFF),
+        ("200000o", 0),
+        ("177777q", 0xFFFF),
+        ("1111111111111111b", 0xFFFF),
+        ("10000000000000000b", 0),
+        ("65535d", 0xFFFF),
+        ("1$000", 1000),
+        ("$1$0", 0x10),
+        ("1$0h", 0x10),
+        ("&H1$0", 0x10),
+        ("&O17", 15),
+        ("&X101", 5),
+        ("&X1$0", 2),
+        ("%1$1", 3),
+        ("18446744073709551616", 0xFFFF),
+        ("18446744073709551615", 0xFFFF),
+        ("123456789ABCDEF0123h", 0xFFFF),
+    ] {
+        let value = number_value(text, &rules).map(|v| v & 0xFFFF);
+        assert_eq!(value, Some(expected), "{text}");
+    }
+    assert_eq!(number_value("12G", &rules), None);
+}

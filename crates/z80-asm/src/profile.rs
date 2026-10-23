@@ -39,9 +39,10 @@ pub(crate) struct Lexical {
     /// What starts a hexadecimal number. The prefix must be followed directly
     /// by a hexadecimal digit, or it is not a number.
     pub(crate) hex_prefixes: &'static [&'static str],
-    /// What always starts a hexadecimal number, digits or not. Without
-    /// digits after it, it is an invalid number rather than something else.
-    pub(crate) committed_hex_prefixes: &'static [&'static str],
+    /// What always starts a number, digits or not, with the number's base.
+    /// The number takes hexadecimal digits, and is invalid without any or
+    /// with one outside its base, rather than being something else.
+    pub(crate) committed_prefixes: &'static [(&'static str, u32)],
     /// What starts a binary number. The prefix must be followed directly by a
     /// binary digit.
     pub(crate) binary_prefixes: &'static [&'static str],
@@ -65,6 +66,10 @@ pub(crate) struct Lexical {
     pub(crate) token_paste: Option<&'static str>,
     /// Whether a backslash starts an escape inside double-quoted strings.
     pub(crate) double_quote_escapes: bool,
+    /// The largest value a number written with a prefix may have, if there
+    /// is a limit. A larger one is out of range. Numbers that start with a
+    /// digit have no limit.
+    pub(crate) prefixed_max: Option<u64>,
 }
 
 /// How a dialect arranges tokens into lines, statements and expressions.
@@ -465,8 +470,11 @@ impl Profile {
     /// - Hexadecimal is `$FF`, `#FF`, `&FF`, `&HFF`, `0xFF` or `0FFh`. Once
     ///   `&H` is written the token is a number, so `&Hx` is an invalid number
     ///   and `&Hello` is `&He` then `llo`.
-    /// - Binary is `%101` or `101b`, octal is `17o` or `17q`, and decimal may
-    ///   end in `d`.
+    /// - Binary is `%101`, `&X101` or `101b`, octal is `&O17`, `17o` or
+    ///   `17q`, and decimal may end in `d`.
+    /// - A number written with a prefix above `$FFFF` is out of range, even
+    ///   in a line that never runs. One that starts with a digit is not; its
+    ///   value keeps its low 16 bits.
     /// - `$` may sit between the digits of any number and is ignored.
     /// - `$` alone is the current address. `%` and `&` alone are operators.
     /// - Only `af'` takes a prime, in any case.
@@ -479,7 +487,14 @@ impl Profile {
         lexical: Lexical {
             comment_markers: &[";", "//"],
             hex_prefixes: &["$", "#", "&"],
-            committed_hex_prefixes: &["&H", "&h"],
+            committed_prefixes: &[
+                ("&H", 16),
+                ("&h", 16),
+                ("&O", 8),
+                ("&o", 8),
+                ("&X", 2),
+                ("&x", 2),
+            ],
             binary_prefixes: &["%"],
             digit_led_hex_prefixes: &["0x", "0X"],
             radix_suffixes: &[('h', 16), ('b', 2), ('o', 8), ('q', 8), ('d', 10)],
@@ -488,6 +503,7 @@ impl Profile {
             primed_registers: &["af"],
             token_paste: Some("##"),
             double_quote_escapes: true,
+            prefixed_max: Some(0xFFFF),
         },
         grammar: Grammar {
             mnemonics: PASMONEXT_MNEMONICS,
@@ -800,11 +816,9 @@ mod tests {
     #[test]
     fn no_prefix_is_hidden_by_a_shorter_one_before_it() {
         let lexical = Profile::PASMONEXT_0_1_3.lexical;
-        for prefixes in [
-            lexical.hex_prefixes,
-            lexical.committed_hex_prefixes,
-            lexical.comment_markers,
-        ] {
+        let committed: Vec<&'static str> =
+            lexical.committed_prefixes.iter().map(|&(p, _)| p).collect();
+        for prefixes in [lexical.hex_prefixes, &committed, lexical.comment_markers] {
             assert!(shadowed(prefixes).is_none(), "{:?}", shadowed(prefixes));
         }
         // The check itself must be able to fail.

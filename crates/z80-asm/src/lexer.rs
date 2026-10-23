@@ -153,6 +153,7 @@ impl Lexer<'_> {
             } else if let Some(len) = self.committed_number(rest) {
                 (kinds::NUMBER, len)
             } else if let Some(len) = self.prefixed_number(rest) {
+                self.check_range(&rest[..len]);
                 (kinds::NUMBER, len)
             } else if starts_name(rest) {
                 (kinds::IDENT, self.name(rest))
@@ -234,22 +235,40 @@ impl Lexer<'_> {
     }
 
     /// A number whose prefix makes it a number whatever follows, such as
-    /// `&HFF`. Without digits it is reported.
+    /// `&HFF`. It takes hexadecimal digits, as PasmoNext's tokenizer does,
+    /// and is reported without any or with one outside its base.
     fn committed_number(&mut self, rest: &str) -> Option<usize> {
-        let prefix = self
+        let &(prefix, radix) = self
             .rules
-            .committed_hex_prefixes
+            .committed_prefixes
             .iter()
-            .find(|p| rest.starts_with(**p))?;
+            .find(|(p, _)| rest.starts_with(*p))?;
         let digits = &rest[prefix.len()..];
         let run = digits
             .find(|c: char| !c.is_ascii_hexdigit() && Some(c) != self.rules.digit_separator)
             .unwrap_or(digits.len());
         let len = prefix.len() + run;
-        if !digits[..run].chars().any(|c| c.is_ascii_hexdigit()) {
+        let body: Vec<char> = digits[..run]
+            .chars()
+            .filter(|&c| Some(c) != self.rules.digit_separator)
+            .collect();
+        if body.is_empty() || !body.iter().all(|c| c.is_digit(radix)) {
             self.report(len, format!("`{}` is not a valid number", &rest[..len]));
+        } else {
+            self.check_range(&rest[..len]);
         }
         Some(len)
+    }
+
+    /// Reports a number written with a prefix whose value is above the
+    /// profile's limit.
+    fn check_range(&mut self, text: &str) {
+        let Some(max) = self.rules.prefixed_max else {
+            return;
+        };
+        if number_value(text, &self.rules).is_some_and(|value| value > max) {
+            self.report(text.len(), format!("`{text}` is out of range"));
+        }
     }
 
     /// A number written with a prefix, such as `$2A` or `%101`. The prefix
@@ -353,6 +372,57 @@ fn single(c: char) -> Option<SyntaxKind> {
         '<' => kinds::LT,
         '>' => kinds::GT,
         _ => return None,
+    })
+}
+
+/// The value of a number token, read as PasmoNext's tokenizer reads it, or
+/// `None` if the profile does not accept it. Like C's `strtoul`, a value too
+/// large for 64 bits is `u64::MAX`; what to keep of a large value is the
+/// caller's choice.
+pub(crate) fn number_value(text: &str, rules: &Lexical) -> Option<u64> {
+    let starts = |prefix: &str| {
+        text.get(..prefix.len())
+            .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
+    };
+    let prefixed = rules
+        .committed_prefixes
+        .iter()
+        .copied()
+        .chain(rules.digit_led_hex_prefixes.iter().map(|&p| (p, 16)))
+        .chain(rules.hex_prefixes.iter().map(|&p| (p, 16)))
+        .chain(rules.binary_prefixes.iter().map(|&p| (p, 2)))
+        .find(|&(prefix, _)| starts(prefix));
+    // The prefix comes off first, since a separator can look like one.
+    let rest = prefixed.map_or(text, |(prefix, _)| &text[prefix.len()..]);
+    let digits: String = rest
+        .chars()
+        .filter(|&c| Some(c) != rules.digit_separator)
+        .collect();
+    let (body, radix) = match prefixed {
+        Some((_, radix)) => (digits.as_str(), radix),
+        None => {
+            let last = digits.chars().last()?;
+            match rules
+                .radix_suffixes
+                .iter()
+                .find(|(suffix, _)| suffix.eq_ignore_ascii_case(&last))
+            {
+                Some(&(_, radix)) => (&digits[..digits.len() - last.len_utf8()], radix),
+                None => (digits.as_str(), 10),
+            }
+        }
+    };
+    if body.is_empty() {
+        return None;
+    }
+    body.chars().try_fold(0u64, |value, c| {
+        let digit = u64::from(c.to_digit(radix)?);
+        Some(
+            value
+                .checked_mul(u64::from(radix))
+                .and_then(|v| v.checked_add(digit))
+                .unwrap_or(u64::MAX),
+        )
     })
 }
 
