@@ -14,9 +14,12 @@
 //! recorded verdicts.
 //!
 //! The crate is at an early stage. The first profile is PasmoNext 0.1.3, which
-//! the 198x curriculum builds with. The parser follows the plan in
-//! `docs/plans/`.
+//! the 198x curriculum builds with, and [`lex`] splits its source into tokens.
+//! The parser follows the plan in `docs/plans/`.
 
+pub mod kinds;
+mod lexer;
 mod profile;
 
+pub use lexer::{Lexed, Token, lex};
 pub use profile::Profile;

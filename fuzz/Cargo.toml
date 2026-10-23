@@ -1,0 +1,25 @@
+# Fuzz targets for lang198x-z80-asm, run with cargo-fuzz on a pinned nightly.
+# A separate workspace, so its dependencies never reach the library.
+[package]
+name = "lang198x-z80-asm-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+lang198x-syntax = "0.1.1"
+lang198x-z80-asm = { path = "../crates/z80-asm" }
+
+[[bin]]
+name = "lex"
+path = "fuzz_targets/lex.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

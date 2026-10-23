@@ -12,6 +12,11 @@ categories = ["parsing"]
 publish = false
 
 [dependencies]
+lang198x-syntax = "0.1.1"
+
+[dev-dependencies]
+# Generated tests only, as approved in the shared syntax layer decision.
+proptest = "1.12.0"
 
 [lints]
 workspace = true
