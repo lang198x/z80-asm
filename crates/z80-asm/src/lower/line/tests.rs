@@ -329,3 +329,31 @@ fn quirks_and_their_warnings_come_through() {
     assert!(lowered.quirks.contains(&Quirk::RetIgnoresOperand));
     assert_eq!(lowered.warnings().count(), 0);
 }
+
+/// The first operand of `text`'s directive.
+fn operand(text: &str) -> Expr {
+    let parse = crate::parse(text, Profile::PASMONEXT_0_1_3).expect("parses");
+    let line = crate::ast::SourceFile::cast(parse.tree().root())
+        .and_then(|file| file.lines().next())
+        .expect("a line");
+    let Some(Statement::Directive(directive)) = line.statement() else {
+        panic!("a directive");
+    };
+    directive
+        .operands()
+        .next()
+        .and_then(|o| o.expr())
+        .expect("an operand")
+}
+
+#[test]
+fn an_expression_the_expander_asks_about_lowers_on_its_own() {
+    let condition = operand(" if later + 1\n");
+    let ir = expression(&condition, &Profile::PASMONEXT_0_1_3, &Names::default()).expect("lowers");
+    let symbols = BTreeMap::from([("later".to_owned(), 0xFFFF)]);
+    // 16 bits: $FFFF + 1 is 0.
+    assert_eq!(eval(&ir, &symbols), 0);
+    // A register is not a value.
+    let register = operand(" if a\n");
+    assert!(expression(&register, &Profile::PASMONEXT_0_1_3, &Names::default()).is_err());
+}

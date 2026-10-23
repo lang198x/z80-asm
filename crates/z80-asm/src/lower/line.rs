@@ -1,11 +1,11 @@
 //! One line, as the expander hands it over, lowered to IR statements.
 
-use asm198x_ir::Operation;
+use asm198x_ir::{Expr as Ir, Operation};
 use lang198x_syntax::{Diagnostic, TextRange};
 
-use super::expr::{Known, Problem};
+use super::expr::{self, Known, Problem};
 use super::{Cpu, Quirk, directive, instruction};
-use crate::ast::Statement;
+use crate::ast::{self, Statement};
 use crate::expand::ActiveLine;
 use crate::profile::Profile;
 
@@ -41,6 +41,23 @@ impl Lowered {
     pub fn warnings(&self) -> impl Iterator<Item = String> + '_ {
         self.quirks.iter().filter_map(Quirk::warning)
     }
+}
+
+/// Lowers `expr`, such as an `IF` condition or a `REPT` count the expander
+/// asks about, to an IR expression whose value, kept to 16 bits, is the one
+/// PasmoNext gives it. Names stay names; `DEFINED` is answered by `known`.
+///
+/// # Errors
+///
+/// A diagnostic, with its range in `expr`'s tree, if PasmoNext rejects the
+/// expression.
+pub fn expression(
+    expr: &ast::Expr,
+    profile: &Profile,
+    known: &dyn Known,
+) -> Result<Ir, Diagnostic> {
+    expr::lower(expr, profile, known)
+        .map_err(|problem| Diagnostic::new(problem.kind, problem.range, problem.message))
 }
 
 /// Lowers `line` as PasmoNext 0.1.3 assembles it for `cpu`.
