@@ -19,7 +19,9 @@
 
 pub mod kinds;
 mod lexer;
+mod parser;
 mod profile;
 
 pub use lexer::{Lexed, Token, lex};
+pub use parser::{ParseError, parse};
 pub use profile::Profile;

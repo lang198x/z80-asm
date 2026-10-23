@@ -1,6 +1,6 @@
 # Plan: the Z80 family parser with a PasmoNext profile
 
-**Status:** Agreed 2026-10-23. Step 1 is done.
+**Status:** Agreed 2026-10-23. Steps 1 and 2 are done.
 **Binding records:** Lang198x's
 [shared syntax layer decision](https://github.com/lang198x/lang198x/blob/main/decisions/shared-syntax-layer.md)
 and 198x's
@@ -66,7 +66,7 @@ coverage floor on its own.
   escapes in double-quoted strings only, and a prime on `af'` alone. They
   become Asm198x verdicts before the gate relies on them.
 
-### 2. Parser
+### 2. Parser (done)
 
 - **Files:** `crates/z80-asm/src/parser.rs`, `crates/z80-asm/src/parser/`.
 - **What:** one `LINE` node per line, holding an optional `LABEL`, an
@@ -77,6 +77,25 @@ coverage floor on its own.
 - **Verified by:** snapshot trees for every construct class, the shared tree
   invariants, a property that parsing any text round-trips, and fuzz targets on
   the real parser.
+- **As built:** the operator order, line structure and directive operands were
+  measured by running PasmoNext 0.1.3.
+  - **Expressions are checked by value.** A test-only evaluator walks each
+    tree, and all 93 measured expressions must give PasmoNext's values. The
+    10 expressions it rejects must give diagnostics.
+  - **Instruction operands that start with `(` are indirections,** and an
+    index sign covers the whole displacement: `(ix-1+3)` is `(ix-4)`.
+  - **`.ERROR` and `.WARNING` messages are raw text,** comments included, and
+    an unquoted file name runs to the next space. The lexer's complaints
+    inside either are dropped.
+  - **Macro calls to macros defined in another file** are recognised when what
+    follows the name couldn't start a statement. Otherwise the name is read as
+    a label, as PasmoNext reads it.
+  - **`parse` returns a `Result`.** It fails only when no tree can be built,
+    which needs text over 4 GiB.
+  - **Checked outside the tests:** all 391 PasmoNext sources in
+    `code198x/code-samples` parse with no diagnostics. The other 8 Z80
+    sources are written for RGBDS, and the parser rejects them, as PasmoNext
+    does.
 
 ### 3. Typed views
 
@@ -97,6 +116,12 @@ coverage floor on its own.
 - **Verified by:** tests that every token in an expansion traces back to the
   text a person wrote, and that recursion and unterminated blocks give clean
   diagnostics.
+- **Carried over from step 2:** PasmoNext lexes every line but doesn't check
+  the syntax of lines after `END`, inside a false `IF`, or inside a macro
+  body until it is expanded. Preprocessing drops the parser's diagnostics on
+  those lines and keeps the lexer's. One known edge: in an unquoted file name
+  such as `it's.asm ; c`, the apostrophe opens a string that swallows the
+  comment.
 
 ### 5. Lowering, behind the `ir` feature
 

@@ -1,0 +1,60 @@
+SOURCE_FILE@0..43
+  LINE@0..11
+    INSTRUCTION@0..8
+      IDENT@0..2 "ld"
+      WHITESPACE@2..3 " "
+      OPERAND@3..4
+        NAME_REF@3..4
+          IDENT@3..4 "a"
+      COMMA@4..5 ","
+      OPERAND@5..8
+        INDIRECT@5..8
+          L_PAREN@5..6 "("
+          LITERAL@6..7
+            NUMBER@6..7 "2"
+          R_PAREN@7..8 ")"
+    ERROR@8..10
+      STAR@8..9 "*"
+      NUMBER@9..10 "3"
+    NEWLINE@10..11 "\n"
+  LINE@11..17
+    DIRECTIVE@11..16
+      IDENT@11..13 "db"
+      WHITESPACE@13..14 " "
+      OPERAND@14..15
+        LITERAL@14..15
+          NUMBER@14..15 "1"
+      COMMA@15..16 ","
+      OPERAND@16..16
+    NEWLINE@16..17 "\n"
+  LINE@17..23
+    ERROR@17..22
+      NUMBER@17..18 "5"
+      WHITESPACE@18..19 " "
+      IDENT@19..22 "nop"
+    NEWLINE@22..23 "\n"
+  LINE@23..33
+    DIRECTIVE@23..32
+      IDENT@23..25 "dw"
+      WHITESPACE@25..26 " "
+      OPERAND@26..32
+        BIN_EXPR@26..32
+          LITERAL@26..27
+            NUMBER@26..27 "2"
+          WHITESPACE@27..28 " "
+          STAR@28..29 "*"
+          WHITESPACE@29..30 " "
+          UNARY_EXPR@30..32
+            MINUS@30..31 "-"
+            LITERAL@31..32
+              NUMBER@31..32 "3"
+    NEWLINE@32..33 "\n"
+  LINE@33..43
+    LABEL@33..37
+      IDENT@33..36 "foo"
+      COLON@36..37 ":"
+    ERROR@37..42
+      COLON@37..38 ":"
+      WHITESPACE@38..39 " "
+      IDENT@39..42 "nop"
+    NEWLINE@42..43 "\n"
