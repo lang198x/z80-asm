@@ -105,6 +105,38 @@ pub(crate) struct Grammar {
 pub(crate) struct Directive {
     pub(crate) name: &'static str,
     pub(crate) operands: Operands,
+    /// What the directive does to the flow of lines, if anything.
+    pub(crate) role: Role,
+}
+
+/// What a directive does to the flow of lines. Preprocessing acts on these;
+/// every other directive passes through to lowering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Role {
+    /// Nothing: an ordinary directive.
+    None,
+    /// Starts a conditional block, such as `IF`.
+    If,
+    /// Switches to the other branch, such as `ELSE`.
+    Else,
+    /// Ends a conditional block, such as `ENDIF`.
+    Endif,
+    /// Starts a macro definition, such as `MACRO`.
+    Macro,
+    /// Ends a macro, repeat or `IRP` block, such as `ENDM`.
+    Endm,
+    /// Leaves a macro, repeat or `IRP` early, such as `EXITM`.
+    Exitm,
+    /// Drops a macro's first argument, such as `.SHIFT`.
+    Shift,
+    /// Repeats a block, such as `REPT`.
+    Rept,
+    /// Repeats a block once for each value, such as `IRP`.
+    Irp,
+    /// Ends the program, such as `END`.
+    End,
+    /// Reads in another file, such as `INCLUDE`.
+    Include,
 }
 
 /// The shape of a directive's operands.
@@ -310,7 +342,19 @@ const PASMONEXT_REGISTERS: &[&str] = &[
 ];
 
 const fn directive(name: &'static str, operands: Operands) -> Directive {
-    Directive { name, operands }
+    Directive {
+        name,
+        operands,
+        role: Role::None,
+    }
+}
+
+const fn block(name: &'static str, operands: Operands, role: Role) -> Directive {
+    Directive {
+        name,
+        operands,
+        role,
+    }
 }
 
 /// The directives PasmoNext 0.1.3 recognises. `DM`, `IFDEF`, `DEFINE`,
@@ -330,22 +374,22 @@ const PASMONEXT_DIRECTIVES: &[Directive] = &[
     directive("DEFS", Operands::Expressions),
     directive("DS", Operands::Expressions),
     directive("ALIGN", Operands::Expressions),
-    directive("INCLUDE", Operands::Include),
+    block("INCLUDE", Operands::Include, Role::Include),
     directive("INCBIN", Operands::FileName),
-    directive("IF", Operands::Expressions),
-    directive("ELSE", Operands::Expressions),
-    directive("ENDIF", Operands::Expressions),
-    directive("MACRO", Operands::MacroHeader),
-    directive("ENDM", Operands::Expressions),
-    directive("EXITM", Operands::Expressions),
-    directive(".SHIFT", Operands::Expressions),
-    directive("REPT", Operands::Expressions),
-    directive("IRP", Operands::Expressions),
+    block("IF", Operands::Expressions, Role::If),
+    block("ELSE", Operands::Expressions, Role::Else),
+    block("ENDIF", Operands::Expressions, Role::Endif),
+    block("MACRO", Operands::MacroHeader, Role::Macro),
+    block("ENDM", Operands::Expressions, Role::Endm),
+    block("EXITM", Operands::Expressions, Role::Exitm),
+    block(".SHIFT", Operands::Expressions, Role::Shift),
+    block("REPT", Operands::Expressions, Role::Rept),
+    block("IRP", Operands::Expressions, Role::Irp),
     directive("LOCAL", Operands::Expressions),
     directive("PROC", Operands::Expressions),
     directive("ENDP", Operands::Expressions),
     directive("PUBLIC", Operands::Expressions),
-    directive("END", Operands::Expressions),
+    block("END", Operands::Expressions, Role::End),
     directive(".ERROR", Operands::Text),
     directive(".WARNING", Operands::Text),
     // Spectrum Next additions in PasmoNext.
@@ -363,6 +407,50 @@ const PASMONEXT_DIRECTIVES: &[Directive] = &[
     // an error.
     directive("FMESSAGE", Operands::Expressions),
 ];
+
+impl Grammar {
+    /// The directive named `word`, ignoring case.
+    pub(crate) fn directive(&self, word: &str) -> Option<Directive> {
+        self.directives
+            .iter()
+            .find(|d| d.name.eq_ignore_ascii_case(word))
+            .copied()
+    }
+
+    /// Whether `word` is an instruction mnemonic, ignoring case.
+    pub(crate) fn is_mnemonic(&self, word: &str) -> bool {
+        self.mnemonics.iter().any(|m| m.eq_ignore_ascii_case(word))
+    }
+
+    /// Whether `word` starts a statement: a mnemonic or a directive.
+    pub(crate) fn is_keyword(&self, word: &str) -> bool {
+        self.is_mnemonic(word) || self.directive(word).is_some()
+    }
+
+    /// Whether `word` is reserved without starting a statement: a register,
+    /// a condition, a word operator or another word the dialect keeps.
+    pub(crate) fn is_reserved(&self, word: &str) -> bool {
+        let listed = |list: &[&str]| list.iter().any(|w| w.eq_ignore_ascii_case(word));
+        let operators = self.levels.iter().any(|level| {
+            let (Level::Binary(ops) | Level::Unary(ops)) = level;
+            ops.iter()
+                .any(|op| matches!(op, Operator::Word(w) if w.eq_ignore_ascii_case(word)))
+        });
+        listed(self.registers)
+            || listed(self.conditions)
+            || listed(self.current_address_words)
+            || operators
+            || [self.defined, self.nul, self.getbank]
+                .into_iter()
+                .flatten()
+                .any(|w| w.eq_ignore_ascii_case(word))
+    }
+
+    /// The role of the directive named `word`, or [`Role::None`].
+    pub(crate) fn role(&self, word: &str) -> Role {
+        self.directive(word).map_or(Role::None, |d| d.role)
+    }
+}
 
 impl Profile {
     /// PasmoNext 0.1.3, C Kirby's fork of Julian Albo's Pasmo with the ZX
