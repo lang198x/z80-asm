@@ -308,6 +308,27 @@ const REJECTED: Option<&str> = None;
 /// Programs assembled by PasmoNext 0.1.3, with the bytes it wrote or `None`
 /// if it rejected them.
 const MEASURED: &[(&str, &str, Option<&str>)] = &[
+    // A label is defined before the REPT, IRP or call after it runs.
+    (
+        "label_rept_self",
+        " org 0\n db 1,2\nx: rept x+1\n db 9\n endm\n",
+        Some("0102090909"),
+    ),
+    (
+        "label_rept_dollar",
+        " org 0\n db 1,2\nx: rept $+1\n db 9\n endm\n",
+        Some("0102090909"),
+    ),
+    (
+        "label_irp_self",
+        " org 0\n db 1\nx: irp v, x\n db v\n endm\n",
+        Some("0101"),
+    ),
+    (
+        "label_call_self",
+        " org 0\nmm macro v\n rept v\n db v\n endm\n endm\n db 1\nx: mm x\n",
+        Some("0101"),
+    ),
     // Each frame starts its own IF count, and a labelled ENDM is body text.
     (
         "endif_in_macro_closes_nothing_outside",
