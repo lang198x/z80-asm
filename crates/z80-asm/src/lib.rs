@@ -20,6 +20,9 @@
 
 pub mod ast;
 pub mod expand;
+/// The shared tree, spans and diagnostics this crate's API is written in, so
+/// a caller uses the same version of them.
+pub use lang198x_syntax as syntax;
 pub mod kinds;
 mod lexer;
 #[cfg(feature = "ir")]
