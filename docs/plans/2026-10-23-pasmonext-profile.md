@@ -1,6 +1,6 @@
 # Plan: the Z80 family parser with a PasmoNext profile
 
-**Status:** Agreed 2026-10-23. Not started.
+**Status:** Agreed 2026-10-23. Step 1 is done.
 **Binding records:** Lang198x's
 [shared syntax layer decision](https://github.com/lang198x/lang198x/blob/main/decisions/shared-syntax-layer.md)
 and 198x's
@@ -49,7 +49,7 @@ prove it by matching the existing Asm198x front end on every PasmoNext verdict.
 Each step is one pull request that passes format, Clippy, tests and the 95%
 coverage floor on its own.
 
-### 1. Lexer and profile axes
+### 1. Lexer and profile axes (done)
 
 - **Files:** `crates/z80-asm/src/profile.rs`, `crates/z80-asm/src/lexer.rs`,
   `crates/z80-asm/src/kinds.rs`.
@@ -59,6 +59,12 @@ coverage floor on its own.
   is exact. Unknown characters become `ERROR` tokens with a diagnostic.
 - **Verified by:** unit tests per axis, snapshot trees, a property that any
   text lexes into tokens that join back into it, and a fuzz target.
+- **As built:** every lexical rule was measured by running PasmoNext 0.1.3,
+  and each measurement is a unit test. Several go beyond what Asm198x's
+  existing front end handles: `#FF`, `&FF` and `&HFF` hexadecimal, `//`
+  comments, `$` between the digits of any number, the `d` suffix, backslash
+  escapes in double-quoted strings only, and a prime on `af'` alone. They
+  become Asm198x verdicts before the gate relies on them.
 
 ### 2. Parser
 

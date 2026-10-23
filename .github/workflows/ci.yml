@@ -24,3 +24,25 @@ jobs:
       # Every Z80 dialect will rest on this parser. Ratchet up as tests grow;
       # never down.
       coverage-floor: 95
+
+  # Pull requests do not fuzz: a time-boxed run is not repeatable, so it could
+  # fail a pull request that did not cause the problem. Fuzzing runs weekly in
+  # fuzz.yml instead, and every crash it finds becomes a seed or unit test that
+  # the ordinary tests run here. This job only keeps the fuzz targets building
+  # against the current API, with an up-to-date lockfile.
+  fuzz-targets:
+    name: Fuzz targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # A release raises this crate's own version, which the fuzz lockfile
+      # also records. Only that entry is brought in line before the --locked
+      # check, so drift in any other dependency still fails.
+      - name: Check the fuzz targets build
+        run: |
+          version=$(cargo pkgid --manifest-path crates/z80-asm/Cargo.toml | sed 's/.*[@#]//')
+          sed -i "/^name = \"lang198x-z80-asm\"\$/{n;s/^version = .*/version = \"$version\"/}" fuzz/Cargo.lock
+          cargo check --manifest-path fuzz/Cargo.toml --locked --bins
