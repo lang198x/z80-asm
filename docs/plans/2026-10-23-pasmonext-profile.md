@@ -8,18 +8,25 @@ and 198x's
 stage 2.
 
 Build one parser for the Z80 assembler family, with its first profile, and
-prove it by matching the existing Asm198x front end on every Pasmo verdict.
+prove it by matching the existing Asm198x front end on every PasmoNext verdict.
 
 ## Settled before starting
 
 - **The first profile is PasmoNext 0.1.3,** C Kirby's fork of Julian Albo's
-  Pasmo. The installed `pasmo`, all 1,230 Pasmo verdicts in Asm198x
-  (`pasmo` and `pasmonext`) and the curriculum's build container are all
-  PasmoNext 0.1.3. Julian Albo's Pasmo 0.5.x can become its own profile later.
+  Pasmo. The binary installed as `pasmo`, all 1,230 verdicts under Asm198x's
+  `pasmo` and `pasmonext` dialect names, and the curriculum's build container
+  are all PasmoNext 0.1.3. Julian Albo's Pasmo 0.5.x can become its own
+  profile later.
+- **Naming.** "PasmoNext" means C Kirby's fork, and "Pasmo" means only Julian
+  Albo's original. Asm198x's dialect identifiers appear as code: its `pasmo`
+  is PasmoNext 0.1.3 assembling for a plain Z80, and its `pasmonext` is the
+  same tool defaulting to the Spectrum Next's Z80N. Z80 or Z80N is a target,
+  never part of a dialect's name.
 - **The gate runs in Asm198x** (option A, agreed 2026-10-23). Asm198x depends
-  on `lang198x-z80-asm`, runs Pasmo through either front end behind a switch,
-  and its verdict replay checks the new path. The corpus stays in Asm198x and
-  runs against a pinned pair of versions. During development Asm198x uses a
+  on `lang198x-z80-asm`, runs its `pasmo` and `pasmonext` dialects through
+  either front end behind a switch, and its verdict replay checks the new
+  path. The corpus stays in Asm198x and runs against a pinned pair of
+  versions. During development Asm198x uses a
   local path override that is never committed.
 - **Lowering sits behind an optional `ir` feature, off by default** (option 2,
   agreed 2026-10-23). The parser, preprocessing, typed views and profiles do
@@ -28,7 +35,7 @@ prove it by matching the existing Asm198x front end on every Pasmo verdict.
   tools that need only the tree never pull in Asm198x. This keeps the crate
   self-contained for later extraction, while keeping lowering, and the dialect
   knowledge it needs, in this family as the decision requires.
-- **What to match.** The existing front end is a thin Pasmo layer
+- **What to match.** The existing front end is a thin PasmoNext layer
   (`dialects/pasmo.rs`, 1,372 lines) over a Z80 core shared with SjASMPlus
   (`dialects/z80.rs`, 5,272 lines). Stage 2 matches its verdicts: 1,069
   `pasmo` cases (796 instruction forms, 200 fuzz cases and 73 probes,
@@ -58,7 +65,7 @@ coverage floor on its own.
 - **Files:** `crates/z80-asm/src/parser.rs`, `crates/z80-asm/src/parser/`.
 - **What:** one `LINE` node per line, holding an optional `LABEL`, an
   `INSTRUCTION` or `DIRECTIVE` with its `OPERAND`s, and trailing whitespace and
-  comment. Expressions use Pasmo's operators and precedence, built with
+  comment. Expressions use PasmoNext's operators and precedence, built with
   checkpoints. Broken lines become `ERROR` nodes and diagnostics; parsing never
   fails.
 - **Verified by:** snapshot trees for every construct class, the shared tree
@@ -99,13 +106,13 @@ coverage floor on its own.
 
 Pull requests to `asm198x/asm198x`, after publishing `lang198x-z80-asm`.
 
-- **Round trip first:** every Pasmo and PasmoNext verdict source, and every
+- **Round trip first:** every `pasmo` and `pasmonext` verdict source, and every
   curriculum program, parses and comes back byte for byte.
 - **Then bytes:** a switch selects the new front end for `pasmo` and
   `pasmonext`. Verdict replay runs both paths and requires the new one to
   match every verdict, including the recorded rejections.
-- **Then the switch flips:** the new path becomes the default for Pasmo, and
-  the old Pasmo layer is deleted once the gate holds. The shared Z80 core stays
+- **Then the switch flips:** the new path becomes the default for `pasmo` and
+  `pasmonext`, and the old PasmoNext layer is deleted once the gate holds. The shared Z80 core stays
   until SjASMPlus moves too.
 
 ## Afterwards: more dialects
