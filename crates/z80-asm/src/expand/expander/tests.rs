@@ -941,9 +941,15 @@ fn the_expander_wraps_rept_counts_whatever_the_host_returns() {
 
 #[test]
 fn a_rept_counter_counts_from_its_start_by_its_step() {
-    // REPT count, name, start, step sets the name before each pass.
-    let run = run(" org 0\n rept 3, i, 10, 5\n db i\n endm\n");
-    assert_eq!(run.verdict, bytes("0A0F14"));
+    // REPT count, name, start, step sets the name before each pass. Each
+    // case was measured on PasmoNext 0.1.3.
+    let stepped = run(" org 0\n rept 3, cnt, 10, 5\n db cnt\n endm\n");
+    assert_eq!(stepped.verdict, bytes("0A0F14"));
+    let from_zero = run(" org 0\n rept 3, cnt\n db cnt\n endm\n");
+    assert_eq!(from_zero.verdict, bytes("000102"));
+    // A register is not a name, so `i` is rejected.
+    let register = run(" org 0\n rept 2, i\n db 1\n endm\n");
+    assert_eq!(register.verdict, Verdict::Rejected);
 }
 
 #[test]

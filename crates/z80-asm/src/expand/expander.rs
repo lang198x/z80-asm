@@ -959,8 +959,14 @@ impl Expander {
         let counter = match operands.get(1) {
             None => None,
             Some(operand) => {
+                // `parseREPT` takes an identifier, so a register such as `i`
+                // is not a counter's name.
+                let grammar = self.profile.grammar;
                 let name = operand.expr().and_then(|e| match e {
-                    Expr::Name(name) => name.token().map(|t| t.text().to_owned()),
+                    Expr::Name(name) => name
+                        .token()
+                        .map(|t| t.text().to_owned())
+                        .filter(|text| !grammar.is_reserved(text) && !grammar.is_keyword(text)),
                     _ => None,
                 });
                 let Some(name) = name else {
