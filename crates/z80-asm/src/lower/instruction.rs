@@ -8,7 +8,8 @@
 //! `isa198x` has no form for what PasmoNext writes, the bytes are built as
 //! pieces. Where PasmoNext silently writes the wrong code for invalid source,
 //! its bytes are kept, so the output matches it, and a warning says what it
-//! really assembled.
+//! really assembled. Each departure is recorded as a [`Quirk`], so a tool
+//! that ports source to another assembler knows what to rewrite.
 
 // Some of this module serves only the layout host, which comes next.
 #![cfg_attr(not(test), allow(dead_code))]
@@ -23,13 +24,69 @@ use crate::ast::{self, View};
 use crate::kinds;
 use crate::profile::Profile;
 
-/// A lowered instruction, and a warning if PasmoNext assembles it as
-/// something other than what it says.
+/// A lowered instruction, and what PasmoNext did with it that another
+/// assembler might not.
 #[derive(Clone)]
 pub(crate) struct Lowered {
     pub(crate) op: Operation,
-    pub(crate) warning: Option<String>,
+    pub(crate) quirks: Vec<Quirk>,
 }
+
+impl Lowered {
+    /// The warnings the quirks call for.
+    pub(crate) fn warnings(&self) -> impl Iterator<Item = String> + '_ {
+        self.quirks.iter().filter_map(Quirk::warning)
+    }
+}
+
+/// Something PasmoNext 0.1.3 did with a line that another assembler might
+/// read differently. A tool that ports source to another assembler needs
+/// these, to know what to rewrite so the bytes stay the same.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Quirk {
+    /// A value in parentheses was read as a value, because no address fits
+    /// there: `ld b,(12h)` is `ld b,12h`.
+    ParenthesisedValue,
+    /// `ret` ignored the word after it: `ret a` is `ret`.
+    RetIgnoresOperand,
+    /// The Next's `push nn` ignored everything after its value.
+    PushIgnoresRest,
+    /// The Next's `push nn` wrote its value low byte first, though the Next
+    /// reads it high byte first.
+    PushLittleEndian,
+    /// Invalid source was assembled as a different instruction, named here,
+    /// such as `ADD HL,nn` for `sbc hl,1234h`.
+    AssembledAs(String),
+    /// An indexed instruction was written with no displacement byte, so the
+    /// Z80 reads the next byte as one.
+    MissingDisplacement,
+}
+
+impl Quirk {
+    /// A warning, where PasmoNext writes code that does something other than
+    /// what the line says. A quirk that only reads the source loosely, such
+    /// as `ret a`, has none.
+    #[must_use]
+    pub fn warning(&self) -> Option<String> {
+        match self {
+            Self::AssembledAs(what) => Some(format!("PasmoNext 0.1.3 assembles this as {what}")),
+            Self::MissingDisplacement => Some(
+                "PasmoNext 0.1.3 assembles this as an indexed instruction with no displacement \
+                 byte, so the Z80 reads the next byte as the displacement"
+                    .to_owned(),
+            ),
+            Self::ParenthesisedValue
+            | Self::RetIgnoresOperand
+            | Self::PushIgnoresRest
+            | Self::PushLittleEndian => None,
+        }
+    }
+}
+
+/// A label an operand could fill, the values it lays down, and whether it
+/// reads a parenthesised value as a value.
+type Label = (String, Vec<Ir>, bool);
 
 /// Lowers `instruction` as PasmoNext 0.1.3 assembles it for `cpu`.
 pub(crate) fn lower(
@@ -278,8 +335,8 @@ impl Lowering<'_> {
                 let mut memory = lists.clone();
                 if let Some(list) = memory.get_mut(index) {
                     *list = vec![
-                        ("(n)".to_owned(), Vec::new()),
-                        ("(nn)".to_owned(), Vec::new()),
+                        ("(n)".to_owned(), Vec::new(), false),
+                        ("(nn)".to_owned(), Vec::new(), false),
                     ];
                 }
                 if self.find(mnemonic, &memory).is_some() {
@@ -291,7 +348,7 @@ impl Lowering<'_> {
                 }
             }
         }
-        let (form, values) = self.find(mnemonic, &lists).ok_or_else(|| {
+        let (form, values, mut grouped_value) = self.find(mnemonic, &lists).ok_or_else(|| {
             self.problem(if self.knows(mnemonic) {
                 format!(
                     "`{}` has no form for these operands",
@@ -304,13 +361,18 @@ impl Lowering<'_> {
                 )
             })
         })?;
+        grouped_value |= operands.iter().any(grouped);
         Ok(Lowered {
             op: Operation::Instruction {
                 mnemonic: mnemonic.to_owned(),
                 mode: form.mode,
                 operands: values,
             },
-            warning: None,
+            quirks: if grouped_value {
+                vec![Quirk::ParenthesisedValue]
+            } else {
+                Vec::new()
+            },
         })
     }
 
@@ -327,61 +389,65 @@ impl Lowering<'_> {
     }
 
     /// Tries every combination of labels in order, first operand outermost.
+    /// Returns the form, its values, and whether a parenthesised value was
+    /// read as a value.
     fn find(
         &self,
         mnemonic: &str,
-        lists: &[Vec<(String, Vec<Ir>)>],
-    ) -> Option<(&'static isa198x::Form, Vec<Ir>)> {
+        lists: &[Vec<Label>],
+    ) -> Option<(&'static isa198x::Form, Vec<Ir>, bool)> {
         let (set, ext) = self.sets();
-        let mut combos: Vec<(Vec<&str>, Vec<Ir>)> = vec![(Vec::new(), Vec::new())];
+        let mut combos: Vec<(Vec<&str>, Vec<Ir>, bool)> = vec![(Vec::new(), Vec::new(), false)];
         for list in lists {
             combos = combos
                 .into_iter()
-                .flat_map(|(labels, values)| {
-                    list.iter().map(move |(label, more)| {
+                .flat_map(|(labels, values, grouped)| {
+                    list.iter().map(move |(label, more, by_value)| {
                         let mut labels = labels.clone();
                         labels.push(label.as_str());
                         let mut values = values.clone();
                         values.extend(more.iter().cloned());
-                        (labels, values)
+                        (labels, values, grouped || *by_value)
                     })
                 })
                 .collect();
         }
-        combos.into_iter().find_map(|(labels, values)| {
+        combos.into_iter().find_map(|(labels, values, grouped)| {
             let mode = labels.join(",");
             set.find_form(mnemonic, &mode)
                 .or_else(|| ext.and_then(|e| e.find_form(mnemonic, &mode)))
-                .map(|form| (form, values))
+                .map(|form| (form, values, grouped))
         })
     }
 
     /// The labels `arg` could fill as operand `index` of `mnemonic`, each with
     /// the values it lays down.
-    fn labels(
-        &self,
-        mnemonic: &str,
-        index: usize,
-        arg: &Arg,
-    ) -> Result<Vec<(String, Vec<Ir>)>, Problem> {
+    fn labels(&self, mnemonic: &str, index: usize, arg: &Arg) -> Result<Vec<Label>, Problem> {
         Ok(match arg {
-            Arg::Reg(reg) => vec![(reg.clone(), Vec::new())],
+            Arg::Reg(reg) => vec![(reg.clone(), Vec::new(), false)],
             Arg::IndirectReg(reg) if reg == "IX" || reg == "IY" => vec![
-                (format!("({reg})"), Vec::new()),
-                (format!("({reg}+d)"), vec![Ir::Num(0)]),
+                (format!("({reg})"), Vec::new(), false),
+                (format!("({reg}+d)"), vec![Ir::Num(0)], false),
             ],
-            Arg::IndirectReg(reg) => vec![(format!("({reg})"), Vec::new())],
-            Arg::Indexed { reg, disp } => vec![(format!("({reg}+d)"), vec![disp.clone()])],
+            Arg::IndirectReg(reg) => vec![(format!("({reg})"), Vec::new(), false)],
+            Arg::Indexed { reg, disp } => {
+                vec![(format!("({reg}+d)"), vec![disp.clone()], false)]
+            }
             Arg::Address { value, bracket } => {
                 let mut labels = vec![
-                    ("(n)".to_owned(), vec![low_byte(value.clone())]),
-                    ("(nn)".to_owned(), vec![value.clone()]),
+                    ("(n)".to_owned(), vec![low_byte(value.clone())], false),
+                    ("(nn)".to_owned(), vec![value.clone()], false),
                 ];
                 // Where no form has an address here, PasmoNext reads
                 // `(value)` again as a value (`parsebyteparam` backtracks);
                 // it never does for brackets.
                 if !bracket {
-                    labels.extend(self.value_labels(mnemonic, index, value)?);
+                    let values = self.value_labels(mnemonic, index, value)?;
+                    labels.extend(
+                        values
+                            .into_iter()
+                            .map(|(label, values, _)| (label, values, true)),
+                    );
                 }
                 labels
             }
@@ -394,7 +460,7 @@ impl Lowering<'_> {
         mnemonic: &str,
         index: usize,
         value: &Ir,
-    ) -> Result<Vec<(String, Vec<Ir>)>, Problem> {
+    ) -> Result<Vec<Label>, Problem> {
         Ok(match (mnemonic, index) {
             // `parseRST`: the address must be a multiple of 8 below $40.
             ("RST", _) => {
@@ -402,7 +468,7 @@ impl Lowering<'_> {
                 if address & !0x38 != 0 {
                     return Err(self.problem("`rst` takes 0, 8, 10h, 18h, 20h, 28h, 30h or 38h"));
                 }
-                vec![(format!("{address:02X}"), Vec::new())]
+                vec![(format!("{address:02X}"), Vec::new(), false)]
             }
             // `parseIM`.
             ("IM", _) => {
@@ -410,12 +476,12 @@ impl Lowering<'_> {
                 if !(0..=2).contains(&mode) {
                     return Err(self.problem("`im` takes 0, 1 or 2"));
                 }
-                vec![(mode.to_string(), Vec::new())]
+                vec![(mode.to_string(), Vec::new(), false)]
             }
-            ("JR" | "DJNZ", _) => vec![("e".to_owned(), vec![value.clone()])],
+            ("JR" | "DJNZ", _) => vec![("e".to_owned(), vec![value.clone()], false)],
             _ => vec![
-                ("n".to_owned(), vec![low_byte(value.clone())]),
-                ("nn".to_owned(), vec![value.clone()]),
+                ("n".to_owned(), vec![low_byte(value.clone())], false),
+                ("nn".to_owned(), vec![value.clone()], false),
             ],
         })
     }
@@ -428,7 +494,10 @@ impl Lowering<'_> {
         match args {
             [] => Ok(self.form("RET", "", Vec::new())),
             [Arg::Reg(reg)] if self.is_condition(reg) => Ok(self.form("RET", reg, Vec::new())),
-            [Arg::Reg(_)] | [Arg::Value { tokens: 1, .. }] => Ok(self.form("RET", "", Vec::new())),
+            [Arg::Reg(_)] | [Arg::Value { tokens: 1, .. }] => Ok(Lowered {
+                quirks: vec![Quirk::RetIgnoresOperand],
+                ..self.form("RET", "", Vec::new())
+            }),
             _ => Err(self.problem("PasmoNext takes at most one word after `ret`")),
         }
     }
@@ -452,7 +521,12 @@ impl Lowering<'_> {
             return Err(self.problem("`push` with a value is a Spectrum Next instruction"));
         }
         self.required(value)?;
+        let mut quirks = vec![Quirk::PushLittleEndian];
+        if args.len() > 1 {
+            quirks.push(Quirk::PushIgnoresRest);
+        }
         Ok(Lowered {
+            quirks,
             op: Operation::ComputedInstruction(vec![
                 Piece::Lit(0xED),
                 Piece::Lit(0x8A),
@@ -463,7 +537,6 @@ impl Lowering<'_> {
                     signed: false,
                 },
             ]),
-            warning: None,
         })
     }
 
@@ -484,14 +557,13 @@ impl Lowering<'_> {
     /// `parseLDdouble`: on the Next, `ld rr,sp` is `ED 25` whatever the
     /// pair, and with no prefix for `ix` or `iy`.
     fn ld_pair_sp(&self, dest: &str) -> Result<Lowered, Problem> {
-        let warning = (dest != "HL").then(|| {
-            format!(
-                "PasmoNext 0.1.3 assembles `ld {},sp` as ED 25, the same as `ld hl,sp`",
-                dest.to_ascii_lowercase()
-            )
-        });
+        let quirks = if dest == "HL" {
+            Vec::new()
+        } else {
+            vec![Quirk::AssembledAs("LD HL,SP".to_owned())]
+        };
         Ok(Lowered {
-            warning,
+            quirks,
             ..pieces(&[0xED, 0x25])
         })
     }
@@ -526,11 +598,7 @@ impl Lowering<'_> {
                 return Err(self.problem("`(hl)` cannot be loaded into a half of `ix` or `iy`"));
             }
             return Ok(Lowered {
-                warning: Some(
-                    "PasmoNext 0.1.3 assembles this as an indexed load with no displacement \
-                     byte, so the Z80 reads the next byte as the displacement"
-                        .to_owned(),
-                ),
+                quirks: vec![Quirk::MissingDisplacement],
                 ..pieces(&[prefix, 0x70 + src_code])
             });
         }
@@ -554,11 +622,11 @@ impl Lowering<'_> {
             _ => "A",
         };
         Ok(Lowered {
-            warning: Some(format!(
-                "PasmoNext 0.1.3 assembles this as LD {},{}",
+            quirks: vec![Quirk::AssembledAs(format!(
+                "LD {},{}",
                 name(dest_code),
                 name(src_code)
-            )),
+            ))],
             ..pieces(&[prefix, 0x40 + (dest_code << 3) + src_code])
         })
     }
@@ -575,22 +643,17 @@ impl Lowering<'_> {
         args: &[Arg],
     ) -> Result<Lowered, Problem> {
         let next = self.cpu == Cpu::Z80N;
+        // The Next's ADD HL,A and ADD HL,nn, whatever was written.
         let what = |real: &str| {
-            let written = format!(
-                "{} {}",
-                mnemonic.to_ascii_lowercase(),
-                dest.to_ascii_lowercase()
-            );
-            (written != real).then(|| {
-                format!(
-                    "PasmoNext 0.1.3 assembles this as {}",
-                    real.to_ascii_uppercase()
-                )
-            })
+            if mnemonic == "ADD" && dest == "HL" {
+                Vec::new()
+            } else {
+                vec![Quirk::AssembledAs(real.to_owned())]
+            }
         };
         match second {
             Arg::Reg(a) if a == "A" && next => Ok(Lowered {
-                warning: what("add hl").map(|w| format!("{w},A")),
+                quirks: what("ADD HL,A"),
                 ..pieces(&[0xED, 0x31])
             }),
             Arg::Reg(_) => self.matched(mnemonic, &[], args),
@@ -600,7 +663,7 @@ impl Lowering<'_> {
                 }
                 self.required(value)?;
                 Ok(Lowered {
-                    warning: what("add hl").map(|w| format!("{w},nn")),
+                    quirks: what("ADD HL,nn"),
                     op: Operation::ComputedInstruction(vec![
                         Piece::Lit(0xED),
                         Piece::Lit(0x34),
@@ -659,11 +722,7 @@ impl Lowering<'_> {
             return Err(self.problem("expected a half of `ix` or `iy`"));
         };
         Ok(Lowered {
-            warning: Some(
-                "PasmoNext 0.1.3 assembles this as an indexed instruction with no displacement \
-                 byte, so the Z80 reads the next byte as the displacement"
-                    .to_owned(),
-            ),
+            quirks: vec![Quirk::MissingDisplacement],
             ..pieces(&[prefix, 0xCB, code + reg_code])
         })
     }
@@ -690,8 +749,8 @@ impl Lowering<'_> {
                 return Err(self.problem("the bit number must be 0 to 7"));
             }
             let target_labels = self.labels(mnemonic, 1, target)?;
-            let lists = vec![vec![(bit.to_string(), Vec::new())], target_labels];
-            let (form, values) = self.find(mnemonic, &lists).ok_or_else(|| {
+            let lists = vec![vec![(bit.to_string(), Vec::new(), false)], target_labels];
+            let (form, values, _) = self.find(mnemonic, &lists).ok_or_else(|| {
                 self.problem(format!(
                     "`{}` has no form for these operands",
                     mnemonic.to_ascii_lowercase()
@@ -746,7 +805,7 @@ impl Lowering<'_> {
         });
         Ok(Lowered {
             op: Operation::ComputedInstruction(out),
-            warning: None,
+            quirks: Vec::new(),
         })
     }
 
@@ -763,7 +822,7 @@ impl Lowering<'_> {
                 mode,
                 operands: values,
             },
-            warning: None,
+            quirks: Vec::new(),
         }
     }
 }
@@ -832,7 +891,7 @@ fn low_byte(value: Ir) -> Ir {
 fn pieces(bytes: &[u8]) -> Lowered {
     Lowered {
         op: Operation::ComputedInstruction(bytes.iter().copied().map(Piece::Lit).collect()),
-        warning: None,
+        quirks: Vec::new(),
     }
 }
 
@@ -850,7 +909,7 @@ fn sll_indexed(reg: &str, disp: &Ir) -> Lowered {
             },
             Piece::Lit(0x36),
         ]),
-        warning: None,
+        quirks: Vec::new(),
     }
 }
 

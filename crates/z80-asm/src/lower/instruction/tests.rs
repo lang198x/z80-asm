@@ -356,7 +356,8 @@ fn a_plain_z80_takes_everything_but_the_nexts_instructions() {
 
 #[test]
 fn a_miscompile_keeps_pasmonexts_bytes_and_says_what_they_are() {
-    let warning = |source: &str| lowered(source, Cpu::Z80N, &AtZero).and_then(|l| l.warning);
+    let warning =
+        |source: &str| lowered(source, Cpu::Z80N, &AtZero).and_then(|l| l.warnings().next());
     for (source, expected) in [
         (
             "sbc hl,1234h",
@@ -369,10 +370,7 @@ fn a_miscompile_keeps_pasmonexts_bytes_and_says_what_they_are() {
         ),
         ("ld h,ixh", "PasmoNext 0.1.3 assembles this as LD IXH,IXH"),
         ("ld iyl,l", "PasmoNext 0.1.3 assembles this as LD IYL,IYL"),
-        (
-            "ld de,sp",
-            "PasmoNext 0.1.3 assembles `ld de,sp` as ED 25, the same as `ld hl,sp`",
-        ),
+        ("ld de,sp", "PasmoNext 0.1.3 assembles this as LD HL,SP"),
     ] {
         assert_eq!(warning(source).as_deref(), Some(expected), "{source}");
     }
@@ -393,5 +391,44 @@ fn a_miscompile_keeps_pasmonexts_bytes_and_says_what_they_are() {
         "sll (ix+5)",
     ] {
         assert_eq!(warning(source), None, "{source}");
+    }
+}
+
+#[test]
+fn each_quirk_is_named_for_a_tool_that_ports_the_source() {
+    let quirks = |source: &str| {
+        lowered(source, Cpu::Z80N, &AtZero)
+            .map(|l| l.quirks)
+            .unwrap_or_default()
+    };
+    for (source, expected) in [
+        ("ld b,(12h)", vec![Quirk::ParenthesisedValue]),
+        ("ld b,(1)+1", vec![Quirk::ParenthesisedValue]),
+        ("jp nz,(1234h)", vec![Quirk::ParenthesisedValue]),
+        ("ret a", vec![Quirk::RetIgnoresOperand]),
+        ("push 1234h", vec![Quirk::PushLittleEndian]),
+        (
+            "push 1234h,b",
+            vec![Quirk::PushLittleEndian, Quirk::PushIgnoresRest],
+        ),
+        ("sbc hl,a", vec![Quirk::AssembledAs("ADD HL,A".to_owned())]),
+        (
+            "ld h,iyl",
+            vec![Quirk::AssembledAs("LD IYH,IYL".to_owned())],
+        ),
+        ("set 7,ixl", vec![Quirk::MissingDisplacement]),
+    ] {
+        assert_eq!(quirks(source), expected, "{source}");
+    }
+    // Lines another assembler reads the same way carry none.
+    for source in [
+        "ld a,(12h)",
+        "ld b,12h",
+        "ret nz",
+        "jp (hl)",
+        "add hl,a",
+        "ld (ix+5),12h",
+    ] {
+        assert!(quirks(source).is_empty(), "{source}");
     }
 }
