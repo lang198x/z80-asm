@@ -111,6 +111,10 @@ pub(crate) const EXPRESSIONS: &[(&str, u16)] = &[
     ("nul ,7", 0),
     ("NOT nul", 0),
     ("- nul", 1),
+    ("PC", 0),
+    ("pc + 1", 1),
+    ("Pc * 2", 0),
+    ("PC - $", 0),
 ];
 
 /// Expressions PasmoNext 0.1.3 rejects. Each puts a prefix operator where a
@@ -129,4 +133,5 @@ pub(crate) const REJECTED: &[&str] = &[
     "DEFINED (foo)",
     "(nul)",
     "(nul 5)",
+    "?? foo + 1",
 ];

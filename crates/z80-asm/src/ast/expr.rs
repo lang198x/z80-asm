@@ -8,7 +8,7 @@ use crate::kinds;
 /// An expression.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr {
-    /// A number, string or `$`.
+    /// A number, a string, or the current address: `$` or `PC`.
     Literal(Literal),
     /// A name, such as a label, a symbol or a register.
     Name(NameRef),
@@ -24,6 +24,8 @@ pub enum Expr {
     Defined(DefinedExpr),
     /// `NUL` and the rest of the line.
     Nul(NulExpr),
+    /// `?? name`.
+    GetBank(GetBankExpr),
 }
 
 impl View for Expr {
@@ -37,6 +39,7 @@ impl View for Expr {
             kinds::COND_EXPR => Self::Conditional(CondExpr(node)),
             kinds::DEFINED_EXPR => Self::Defined(DefinedExpr(node)),
             kinds::NUL_EXPR => Self::Nul(NulExpr(node)),
+            kinds::GETBANK_EXPR => Self::GetBank(GetBankExpr(node)),
             _ => return None,
         })
     }
@@ -51,6 +54,7 @@ impl View for Expr {
             Self::Conditional(view) => view.syntax(),
             Self::Defined(view) => view.syntax(),
             Self::Nul(view) => view.syntax(),
+            Self::GetBank(view) => view.syntax(),
         }
     }
 }
@@ -67,7 +71,8 @@ view! {
 }
 
 impl Literal {
-    /// Returns the token: a `NUMBER`, a `STRING` or a `DOLLAR`.
+    /// Returns the token: a `NUMBER`, a `STRING`, a `DOLLAR`, or an `IDENT`
+    /// that names the current address, such as `PC`.
     #[must_use]
     pub fn token(&self) -> Option<SyntaxToken> {
         first_token(&self.0)
@@ -193,5 +198,18 @@ impl NulExpr {
     #[must_use]
     pub fn has_rest(&self) -> bool {
         child_tokens(&self.0).nth(1).is_some() || child_nodes(&self.0).next().is_some()
+    }
+}
+
+view! {
+    /// `?? name`, which asks which memory bank a name is in.
+    GetBankExpr, kinds::GETBANK_EXPR
+}
+
+impl GetBankExpr {
+    /// Returns the name asked about.
+    #[must_use]
+    pub fn name(&self) -> Option<NameRef> {
+        child(&self.0)
     }
 }
