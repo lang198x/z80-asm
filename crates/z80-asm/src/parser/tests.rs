@@ -651,3 +651,46 @@ proptest! {
         }
     }
 }
+
+#[test]
+fn brackets_mark_an_indirect_operand_as_parentheses_do() {
+    // Each of these assembled on PasmoNext 0.1.3.
+    assert_eq!(
+        line("ld a,[hl]"),
+        "(LINE (INSTRUCTION ld (OPERAND (NAME_REF a)) , (OPERAND (INDIRECT [ (NAME_REF hl) ]))))"
+    );
+    assert_eq!(
+        line("ld a,[ iy - 3 ]"),
+        "(LINE (INSTRUCTION ld (OPERAND (NAME_REF a)) , (OPERAND (INDIRECT [ (INDEX (NAME_REF iy) - (LITERAL 3)) ]))))"
+    );
+    assert_eq!(
+        line("ld a,[(1)]"),
+        "(LINE (INSTRUCTION ld (OPERAND (NAME_REF a)) , (OPERAND (INDIRECT [ (PAREN_EXPR ( (LITERAL 1) )) ]))))"
+    );
+    for fine in [
+        "ld a,[ix]",
+        "ld [1234h],a",
+        "ld a,[1+2]",
+        "jp [hl]",
+        "out [c],a",
+    ] {
+        assert!(problems(fine).is_empty(), "{fine}: {:?}", problems(fine));
+    }
+}
+
+#[test]
+fn an_indirect_operand_closes_with_the_partner_of_what_opened_it() {
+    // PasmoNext 0.1.3 rejected each of these.
+    assert_eq!(
+        problems("ld a,[hl)").first().map(String::as_str),
+        Some("8..8 expected `]`")
+    );
+    assert_eq!(
+        problems("ld a,(hl]").first().map(String::as_str),
+        Some("8..8 expected `)`")
+    );
+    // Brackets never group an expression, and a directive takes none.
+    assert!(!problems("ld a,[[1]]").is_empty());
+    assert!(!problems("db [1]").is_empty());
+    assert!(!problems("ld a,[1]+1").is_empty());
+}

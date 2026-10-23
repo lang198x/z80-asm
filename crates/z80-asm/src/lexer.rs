@@ -358,6 +358,8 @@ fn single(c: char) -> Option<SyntaxKind> {
         ':' => kinds::COLON,
         '(' => kinds::L_PAREN,
         ')' => kinds::R_PAREN,
+        '[' => kinds::L_BRACK,
+        ']' => kinds::R_BRACK,
         '+' => kinds::PLUS,
         '-' => kinds::MINUS,
         '*' => kinds::STAR,

@@ -93,6 +93,10 @@ pub(crate) struct Grammar {
     /// Registers that take a signed displacement inside parentheses, such as
     /// `ix` in `(ix+5)`. Matching ignores case.
     pub(crate) index_registers: &'static [&'static str],
+    /// Whether an instruction's indirect operand may be written in square
+    /// brackets, `[hl]`, as well as parentheses. Brackets never group an
+    /// expression.
+    pub(crate) bracket_indirection: bool,
     /// Register names, in lower case. They are reserved: none can be a label
     /// or a macro parameter.
     pub(crate) registers: &'static [&'static str],
@@ -513,6 +517,7 @@ impl Profile {
             defined: Some("DEFINED"),
             nul: Some("NUL"),
             index_registers: &["ix", "iy"],
+            bracket_indirection: true,
             registers: PASMONEXT_REGISTERS,
             conditions: &["nz", "z", "nc", "c", "po", "pe", "p", "m"],
             current_address_words: &["PC"],

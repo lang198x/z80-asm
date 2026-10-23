@@ -1,4 +1,4 @@
-SOURCE_FILE@0..24
+SOURCE_FILE@0..23
   IDENT@0..2 "ld"
   WHITESPACE@2..3 " "
   IDENT@3..4 "a"
@@ -7,11 +7,10 @@ SOURCE_FILE@0..24
   WHITESPACE@8..9 " "
   ERROR@9..10 "^"
   WHITESPACE@10..11 " "
-  ERROR@11..12 "["
+  ERROR@11..12 "\\"
   IDENT@12..13 "x"
-  ERROR@13..14 "]"
-  NEWLINE@14..15 "\n"
-  IDENT@15..17 "db"
-  WHITESPACE@17..18 " "
-  STRING@18..23 "\"open"
-  NEWLINE@23..24 "\n"
+  NEWLINE@13..14 "\n"
+  IDENT@14..16 "db"
+  WHITESPACE@16..17 " "
+  STRING@17..22 "\"open"
+  NEWLINE@22..23 "\n"
