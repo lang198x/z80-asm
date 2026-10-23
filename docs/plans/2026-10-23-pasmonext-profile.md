@@ -1,6 +1,6 @@
 # Plan: the Z80 family parser with a PasmoNext profile
 
-**Status:** Agreed 2026-10-23. Steps 1 to 3 are done.
+**Status:** Agreed 2026-10-23. Steps 1 to 3 are done; step 4's design is agreed.
 **Binding records:** Lang198x's
 [shared syntax layer decision](https://github.com/lang198x/lang198x/blob/main/decisions/shared-syntax-layer.md)
 and 198x's
@@ -115,22 +115,73 @@ coverage floor on its own.
 
 ### 4. Preprocessing
 
-- **Files:** `crates/z80-asm/src/expand/`, plus provenance tables in
-  `lang198x-syntax`, released first.
-- **What:** `MACRO`/`ENDM` with `LOCAL`, `REPT`, `IRP`, `IF`/`ELSE`/`ENDIF`,
-  `INCLUDE`, `INCBIN` and `PROC`/`ENDP`. Expansion produces text, which is
-  parsed into an expansion tree, with a table mapping its ranges back to where
-  they came from. The front end drives expansion, because conditions depend on
-  values.
+**Design:** agreed 2026-10-23. The expander walks the program once and asks a
+host to evaluate conditions (option 1 of three considered). Provenance comes
+from `lang198x-syntax` 0.1.2, already released.
+
+**Measured on PasmoNext 0.1.3,** which shapes the design:
+
+- **Includes are eager.** An `INCLUDE` inside `IF 0` still opens its file, and
+  a missing file is an error. Includes can therefore be spliced in first, with
+  no evaluation.
+- **Everything else is one pass, top to bottom.** `IF`, `REPT` and macro calls
+  see only what is defined above them: `IF later`, `REPT N` with `N` defined
+  below, and a call before the macro's definition are all rejected. `IF
+  DEFINED later` is false at that point. Macros may be redefined and nested.
+- **A macro from an included file is called like any other,** with arguments or
+  alone. Its name is case-sensitive.
+- **A parameter cannot be a register name:** `border macro c` is rejected.
+- **`LOCAL`, `PROC` and `ENDP` are about naming scope,** not text.
+
+**Rejected alternatives:**
+
+- The expander pushing each line to a host callback: the same split with
+  control inverted, which makes lowering keep its state between calls.
+- The expander evaluating conditions itself: it would need instruction sizes,
+  which belong to Asm198x under the assembly source layer decision.
+
+#### 4a. Includes
+
+- **Files:** `crates/z80-asm/src/expand/include.rs`.
+- **What:** splice every `INCLUDE`, recursively, into one *program* text, built
+  with `ExpansionBuilder`. The root file's text gets `Source` origins and an
+  included file's text gets `Included` origins with the `INCLUDE` line as the
+  site. Files come from a loader the caller supplies, so the crate never
+  touches the file system. Missing files, include cycles and deep nesting give
+  diagnostics. `INCBIN` stays a directive for lowering.
+- **Why first:** parsing the program text, rather than each file alone, means
+  every macro an include defines is seen before it is used. A file parsed on
+  its own reports such lines as *unknown* instead (z80-asm#6).
+- **Verified by:** tests that every byte of the program traces back to the file
+  it came from, a test that a macro from an include parses as a call, and
+  measured PasmoNext cases for the line breaks around an included file.
+
+#### 4b. The expander
+
+- **Files:** `crates/z80-asm/src/expand/`, one module per construct.
+- **What:** walks the program's lines once and yields the *active* lines, in
+  order, to its caller.
+  - **Conditions:** at `IF`, `REPT` and `IRP`, it asks a host trait, roughly
+    `evaluate(expr, span) -> value, unknown or error`. In production the host
+    is lowering, which has seen every line before and so knows the addresses
+    so far. Tests use a host that evaluates constants.
+  - **Macros:** it keeps the definitions. A call substitutes the arguments into
+    the body as text, with `Expanded` origins, parses the result with
+    `parse_with_macros`, and yields its lines. `EXITM` and `.SHIFT` work
+    inside a call.
+  - **What passes through:** `LOCAL`, `PROC`, `ENDP`, `INCBIN` and every
+    ordinary instruction and directive go to the host unchanged.
+  - **What it drops:** lines in a false `IF` branch, in a macro body until it
+    is called, and after `END`. Their syntax diagnostics are dropped; their
+    lexer diagnostics are kept, as PasmoNext reports those anywhere.
 - **Verified by:** tests that every token in an expansion traces back to the
-  text a person wrote, and that recursion and unterminated blocks give clean
-  diagnostics.
-- **Carried over from step 2:** PasmoNext lexes every line but doesn't check
-  the syntax of lines after `END`, inside a false `IF`, or inside a macro
-  body until it is expanded. Preprocessing drops the parser's diagnostics on
-  those lines and keeps the lexer's. One known edge: in an unquoted file name
-  such as `it's.asm ; c`, the apostrophe opens a string that swallows the
-  comment.
+  text a person wrote; recursion limits and unterminated blocks giving clean
+  diagnostics; and byte comparisons with PasmoNext for programs that use only
+  `DB`/`DW`, constants, `IF`, `REPT`, `IRP` and macros, where the test host can
+  produce the bytes itself.
+
+**Carried over from step 2:** one known edge: in an unquoted file name such as
+`it's.asm ; c`, the apostrophe opens a string that swallows the comment.
 
 ### 5. Lowering, behind the `ir` feature
 
