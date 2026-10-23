@@ -192,6 +192,14 @@ struct Frame {
     outer_if_level: u32,
 }
 
+/// A `REPT`, `IRP` or call that waits for the host to see its label first.
+enum Pending {
+    /// The block directive at token `at`.
+    Block { role: Role, at: usize },
+    /// A call to `name`, whose arguments start at token `args`.
+    Call { name: String, args: usize },
+}
+
 /// A line about to run: its tree and where it is.
 struct Current {
     line: Line,
@@ -245,6 +253,8 @@ pub struct Expander {
     /// problem once.
     reported: HashSet<(TextId, Diagnostic)>,
     queue: VecDeque<ActiveLine>,
+    /// What runs once the host has seen the label line in the queue.
+    pending: Option<(Pending, Current)>,
     finished: bool,
     lines_run: usize,
     expanded_bytes: usize,
@@ -315,6 +325,7 @@ impl Expander {
             reported: diagnostics.iter().cloned().collect(),
             diagnostics,
             queue: VecDeque::new(),
+            pending: None,
             finished: false,
             lines_run: 0,
             expanded_bytes: 0,
@@ -328,6 +339,16 @@ impl Expander {
         loop {
             if let Some(line) = self.queue.pop_front() {
                 return Some(line);
+            }
+            // PasmoNext defines a label before it runs the REPT, IRP or call
+            // after it, so `x: rept x+1` can count with `x`. The host has
+            // assembled the label line by now.
+            if let Some((pending, current)) = self.pending.take() {
+                match pending {
+                    Pending::Block { role, at } => self.run_block(role, &current, at, host),
+                    Pending::Call { name, args } => self.call(&name, &current, args, host),
+                }
+                continue;
             }
             if self.finished {
                 return None;
@@ -561,6 +582,7 @@ impl Expander {
             self.pop(host);
         }
         self.queue.clear();
+        self.pending = None;
         self.finished = true;
     }
 
@@ -704,7 +726,7 @@ impl Expander {
                     self.ended = true;
                 } else {
                     self.queue_label_only(&current);
-                    self.run_block(role, &current, next, host);
+                    self.pending = Some((Pending::Block { role, at: next }, current));
                 }
             }
             Word::Block(Role::Include) => {}
@@ -721,7 +743,8 @@ impl Expander {
             Word::Name(other) => {
                 if self.macros.contains_key(&other) {
                     self.queue_label_only(&current);
-                    self.call(&other, &current, next + 1, host);
+                    let args = next + 1;
+                    self.pending = Some((Pending::Call { name: other, args }, current));
                 } else {
                     let message = format!("`{other}` is not a macro defined above");
                     self.report_current(&current, &message);
