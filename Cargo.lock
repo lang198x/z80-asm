@@ -159,9 +159,9 @@ dependencies = [
 
 [[package]]
 name = "lang198x-syntax"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "038af70e1ea7463bd5f5f7a22b7976f73b00efa7b4233c671ca405fc2cd99599"
+checksum = "9c225ca928528a659aeecde8a98b005d57e60cda1442c93dd4884880b6d92d3a"
 
 [[package]]
 name = "lang198x-z80-asm"

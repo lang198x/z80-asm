@@ -18,6 +18,7 @@
 //! The parser follows the plan in `docs/plans/`.
 
 pub mod ast;
+pub mod expand;
 pub mod kinds;
 mod lexer;
 #[cfg(test)]
