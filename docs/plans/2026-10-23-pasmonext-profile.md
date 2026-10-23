@@ -140,7 +140,7 @@ from `lang198x-syntax` 0.1.2, already released.
 - The expander evaluating conditions itself: it would need instruction sizes,
   which belong to Asm198x under the assembly source layer decision.
 
-#### 4a. Includes
+#### 4a. Includes (done)
 
 - **Files:** `crates/z80-asm/src/expand/include.rs`.
 - **What:** splice every `INCLUDE`, recursively, into one *program* text, built
@@ -155,6 +155,26 @@ from `lang198x-syntax` 0.1.2, already released.
 - **Verified by:** tests that every byte of the program traces back to the file
   it came from, a test that a macro from an include parses as a call, and
   measured PasmoNext cases for the line breaks around an included file.
+- **As built:** `expand::Program::load(name, text, profile, loader)`.
+  - **Splicing:** the file's text replaces the `INCLUDE` line's content, and
+    the line's own ending follows, as PasmoNext reads it. So a file without a
+    final newline still ends its line, and no text is invented.
+  - **Where includes open:** every `INCLUDE` is spliced, including those in
+    unused macro bodies and after `END`, as PasmoNext opens them all.
+  - **Rejected `INCLUDE` lines stay in place with a diagnostic:** one with a
+    label (measured), with text after the name, or naming a missing file.
+  - **Files are numbered per inclusion.** Each `LoadedFile` records the
+    `INCLUDE` that read it, so a chain of includes can be followed out to the
+    root. The loader gets names exactly as written.
+  - **Limits:** includes nest at most 64 deep and load at most 4,096 files.
+    PasmoNext never finishes on a cycle. The depth limit also keeps the
+    recursion off the end of the stack: without it, a self-include overflows
+    before the file limit stops it.
+  - **Checked outside the tests:** every PasmoNext program in
+    `code198x/code-samples` loads and parses with no diagnostics, 235
+    includes in all. One program needs `build/vocabulary.inc`, which its
+    Makefile generates. With that file generated in a scratch copy, it loads
+    too, and PasmoNext assembles it.
 
 #### 4b. The expander
 
