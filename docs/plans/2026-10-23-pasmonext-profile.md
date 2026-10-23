@@ -309,6 +309,25 @@ Design agreed 2026-10-23.
     target.
 - **Pull requests:** 5a, the feature, CI and expressions; 5b, instructions;
   5c, directives, the layout host, spans and the entry point.
+- **As built, 5a:** the `ir` feature, CI's all-features runs and the
+  separation job, and `lower::expr`.
+  - **PasmoNext's arithmetic, read from its source:** values are
+    `unsigned short`, so every operator is wrapped to 16 bits; comparisons
+    are unsigned and give `$FFFF`; shift counts are taken modulo 32 (it
+    shifts a 32-bit `int`); characters are signed, so `"\x80"` is `$FF80`.
+  - **Skipped sides:** `&&`, `||` and `?:` never evaluate the side they skip,
+    so `defined x ? x : 0` works when `x` is undefined. The IR has no
+    conditional, so `?:` is decided while lowering when its condition is
+    known, and otherwise built bit by bit from `&&`, which the IR skips the
+    same way.
+  - **Found on the way, fixed first:** `&O`, `&X` and out-of-range numbers in
+    the lexer (z80-asm#14), which found two curriculum demos PasmoNext rejects
+    (code198x/code-samples#183, asm198x#962); a label before a `REPT`, `IRP`
+    or call (z80-asm#12).
+  - **Checked:** all 107 measured expressions and 51 measured corners give
+    PasmoNext's values through `asm198x-ir`'s evaluator. A script re-ran every
+    corner on PasmoNext, which caught two that were written from reasoning
+    rather than measured. Seven deliberate breaks are each caught.
 
 ### 6. The gate, in Asm198x
 
