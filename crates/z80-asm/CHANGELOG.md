@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.2](https://github.com/lang198x/z80-asm/compare/lang198x-z80-asm-v0.2.1...lang198x-z80-asm-v0.2.2) - 2026-10-25
 
+The rest of PasmoNext 0.1.3's directives, and two more of its options, each
+measured on PasmoNext. Structures, `RB`, `RW`, `RSSET`, `STACK`, `SETBANK` and
+`SAVEBIN` lower to a `Definition` for the assembler to give values, since those
+depend on earlier lines. `.WARNING` and `MESSAGE` lower to a `Message`, `??`
+reads a name's bank through `Known::bank`, and `.ERROR` and `HEX` lower
+directly. `Profile::with_brackets_only` is `--bracket` and
+`Profile::with_8080_warnings` is `--w8080`.
+
+Where PasmoNext has an obvious bug, the bug is fixed rather than copied. Some
+examples: its reserve counter is never reset between passes, `HEX` takes text
+that isn't hex, `SAVEBIN` drops what follows its size, and `--w8080` warns
+about the 8080's own `OUT (n),A`.
+
 ### Added
 
 - read PasmoNext's --bracket and --w8080 options
