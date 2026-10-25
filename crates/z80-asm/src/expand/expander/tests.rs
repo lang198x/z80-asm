@@ -861,7 +861,52 @@ const MEASURED: &[(&str, &str, Option<&str>)] = &[
     ),
     ("end_column_0", " org 0\n db 1\nend\n db 2\n", Some("01")),
     ("label_on_end", " org 0\n db 7\nhere: end\n", Some("07")),
+    // Text after a run `ELSE` or `ENDIF` is an error.
+    (
+        "else_taken_junk",
+        " if 1\n db 1\n else junk\n db 2\n endif\n",
+        REJECTED,
+    ),
+    (
+        "else_taken_instruction",
+        " if 1\n db 1\n else db 9\n endif\n",
+        REJECTED,
+    ),
+    ("endif_taken_junk", " if 1\n db 1\n endif junk\n", REJECTED),
+    (
+        "else_comment",
+        " if 0\n db 1\n else ; c\n db 2\n endif\n",
+        Some("02"),
+    ),
 ];
+
+/// Measured on PasmoNext 0.1.3, which reads nothing after these `ELSE`,
+/// `ENDIF` and `ENDM` lines and so drops the text: what it wrote, and what
+/// the expander says instead. Dropping part of a line is one of its bugs,
+/// which is fixed rather than copied.
+const DROPPED: &[(&str, &str, &str)] = &[
+    (" if 0\n db 1\n else junk\n db 2\n endif\n", "02", "`ELSE`"),
+    (" if 0\n db 1\n else db 9\n endif\n", "", "`ELSE`"),
+    (" if 0\n db 1\n endif junk\n", "", "`ENDIF`"),
+    (" if 0\n if 1\n endif junk\n endif\n", "", "`ENDIF`"),
+    (" rept 2\n db 1\n endm junk\n", "0101", "`ENDM`"),
+    (" rept 0\n db 1\n endm junk\n", "", "`ENDM`"),
+    (" irp x,1,2\n db x\n endm junk\n", "0102", "`ENDM`"),
+    ("mm macro\n db 1\n endm junk\n mm\n", "01", "`ENDM`"),
+];
+
+#[test]
+fn text_pasmonext_drops_after_a_block_keyword_is_rejected() {
+    for (text, _pasmonext, keyword) in DROPPED {
+        let run = run(text);
+        assert_eq!(run.verdict, Verdict::Rejected, "{text}");
+        let expected = format!(
+            "expected the end of the line after {keyword}: PasmoNext 0.1.3 ignores the rest of \
+             this line"
+        );
+        assert_eq!(run.problems.first(), Some(&expected), "{text}");
+    }
+}
 
 #[test]
 fn every_measured_program_gives_pasmonexts_verdict() {

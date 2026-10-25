@@ -50,15 +50,20 @@ pub enum Quirk {
     /// A value in parentheses was read as a value, because no address fits
     /// there: `ld b,(12h)` is `ld b,12h`. PasmoNext's manual documents this.
     ParenthesisedValue,
+    /// A byte value that starts with `(` on a line that ends with `)`, as in
+    /// `ld b,(12h)` or `add a,(5)`, where PasmoNext warns that the line
+    /// "looks like a non existent instruction". It comes with
+    /// [`ParenthesisedValue`](Self::ParenthesisedValue).
+    LooksLikeAnAddress,
 }
 
 impl Quirk {
-    /// A warning, where PasmoNext writes code that does something other than
-    /// what the line says. None of the quirks lowering applies has one now.
+    /// The warning PasmoNext gives for the quirk, if any.
     #[must_use]
     pub fn warning(&self) -> Option<String> {
         match self {
             Self::ParenthesisedValue => None,
+            Self::LooksLikeAnAddress => Some("looks like a non existent instruction".into()),
         }
     }
 }
@@ -282,7 +287,7 @@ impl Lowering<'_> {
                 self.ld_pair_sp(dest)
             }
             ("LD", [dest, src]) if is_index_half(dest) || is_index_half(src) => {
-                self.ld_index_half(dest, src, args)
+                self.ld_index_half(dest, src, operands, args)
             }
             // `parseADD` reaches `parseADDADCSBCHL` with `hl`, `ix` or `iy`;
             // `parseADC` and `parseSBC` only with `hl`.
@@ -389,18 +394,50 @@ impl Lowering<'_> {
             })
         })?;
         grouped_value |= paren_indirection && operands.iter().any(grouped);
+        let looks = paren_indirection && self.looks_like_an_address(mnemonic, form, operands, args);
         Ok(Lowered {
             op: Operation::Instruction {
                 mnemonic: mnemonic.to_owned(),
                 mode: form.mode,
                 operands: values,
             },
-            quirks: if grouped_value {
-                vec![Quirk::ParenthesisedValue]
-            } else {
-                Vec::new()
+            quirks: match (grouped_value, looks) {
+                (_, true) => vec![Quirk::ParenthesisedValue, Quirk::LooksLikeAnAddress],
+                (true, false) => vec![Quirk::ParenthesisedValue],
+                (false, false) => Vec::new(),
             },
         })
+    }
+
+    /// `dobyteinmediate`'s check: a byte value, for `LD` into a register or
+    /// `(hl)` or for an arithmetic or logic instruction, that starts with `(`
+    /// on a line that ends with `)`.
+    fn looks_like_an_address(
+        &self,
+        mnemonic: &str,
+        form: &isa198x::Form,
+        operands: &[ast::Operand],
+        args: &[Arg],
+    ) -> bool {
+        let byte_routine = match mnemonic {
+            // `ld (ix+d),n` reads its value by another route.
+            "LD" => match args.first() {
+                Some(Arg::Indexed { .. }) => false,
+                Some(Arg::IndirectReg(reg)) => reg == "HL",
+                _ => true,
+            },
+            "ADD" | "ADC" | "SUB" | "SBC" | "AND" | "XOR" | "OR" | "CP" => true,
+            _ => false,
+        };
+        let opens = operands.last().is_some_and(|operand| {
+            meaningful_tokens(operand.syntax())
+                .first()
+                .is_some_and(|t| t.kind() == kinds::L_PAREN)
+        });
+        let closes = meaningful_tokens(self.instruction.syntax())
+            .last()
+            .is_some_and(|t| t.kind() == kinds::R_PAREN);
+        byte_routine && form.mode.rsplit(',').next() == Some("n") && opens && closes
     }
 
     fn sets(&self) -> (&'static InstructionSet, Option<&'static InstructionSet>) {
@@ -577,7 +614,13 @@ impl Lowering<'_> {
     /// in PasmoNext checks the other side, so it writes `ld h,ixh` as
     /// `LD IXH,IXH` and `ld (hl),ixh` as `LD (IX+d),H` with no displacement
     /// byte. Lowering rejects both.
-    fn ld_index_half(&self, dest: &Arg, src: &Arg, args: &[Arg]) -> Result<Lowered, Problem> {
+    fn ld_index_half(
+        &self,
+        dest: &Arg,
+        src: &Arg,
+        operands: &[ast::Operand],
+        args: &[Arg],
+    ) -> Result<Lowered, Problem> {
         let code = |arg: &Arg| match arg {
             Arg::Reg(r) => register_code(r).or_else(|| index_half(r).map(|(_, code)| code)),
             Arg::IndirectReg(r) if r == "HL" => Some(6),
@@ -588,7 +631,7 @@ impl Lowering<'_> {
             _ => None,
         };
         let (Some(dest_code), Some(src_code)) = (code(dest), code(src)) else {
-            return self.matched("LD", &[], args);
+            return self.matched("LD", operands, args);
         };
         let prefixes = (prefix(dest), prefix(src));
         let prefix = match prefixes {
@@ -596,7 +639,7 @@ impl Lowering<'_> {
                 return Err(self.problem("`ix` and `iy` halves cannot be mixed"));
             }
             (Some(p), _) | (_, Some(p)) => p,
-            (None, None) => return self.matched("LD", &[], args),
+            (None, None) => return self.matched("LD", operands, args),
         };
         if dest_code == 6 || src_code == 6 {
             if prefixes.0.is_some() {
@@ -610,7 +653,7 @@ impl Lowering<'_> {
         let miscompiled = !both_halves
             && (real(dest_code) && prefixes.0.is_none() || real(src_code) && prefixes.1.is_none());
         if !miscompiled {
-            return self.matched("LD", &[], args);
+            return self.matched("LD", operands, args);
         }
         let name = |c: u8| match (c, prefix) {
             (4, 0xDD) => "IXH",

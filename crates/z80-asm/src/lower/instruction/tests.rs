@@ -489,9 +489,13 @@ fn each_quirk_is_named_for_a_tool_that_ports_the_source() {
             .map(|l| l.quirks)
             .unwrap_or_default()
     };
-    for source in ["ld b,(12h)", "ld b,(1)+1", "jp nz,(1234h)"] {
+    for source in ["ld b,(1)+1", "jp nz,(1234h)"] {
         assert_eq!(quirks(source), [Quirk::ParenthesisedValue], "{source}");
     }
+    assert_eq!(
+        quirks("ld b,(12h)"),
+        [Quirk::ParenthesisedValue, Quirk::LooksLikeAnAddress]
+    );
     // Lines another assembler reads the same way carry none.
     for source in [
         "ld a,(12h)",
@@ -663,4 +667,68 @@ fn with_brackets_only_parentheses_only_group() {
         // Grouping is not a quirk where parentheses mean nothing else.
         assert!(lowered.is_none_or(|l| l.quirks.is_empty()), "{source}");
     }
+}
+
+/// The accepted lines PasmoNext 0.1.3 warned "looks like a non existent
+/// instruction" about.
+const LOOKS: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/data/pasmonext-0.1.3-looks.tsv"
+));
+
+/// More lines measured on PasmoNext 0.1.3, with `fwd` defined after them,
+/// and whether it gave the warning.
+const LOOKS_MORE: &[(&str, bool)] = &[
+    ("ld b,(1)+(2)", true),
+    ("ld b,((1))", true),
+    ("ld b,(1+1)", true),
+    ("add a,(1)*(2)", true),
+    ("sub (5)", true),
+    ("ld (hl),(5)", true),
+    ("ld ixh,(5)", true),
+    ("ld b,(1) ; c", true),
+    ("ld b,(fwd)", true),
+    ("ld b,(1)+1", false),
+    ("ld b,-(1)", false),
+    ("ld (ix+1),(5)", false),
+    ("ld a,(5)", false),
+    ("ld hl,(5)", false),
+    ("out (5),a", false),
+    ("call (5)", false),
+    ("im (1)", false),
+    ("rst (8)", false),
+    ("djnz ($)", false),
+    ("bit (1),a", false),
+];
+
+#[test]
+fn a_parenthesised_byte_warns_where_pasmonext_warns() {
+    let warns = |source: &str| {
+        lowered(source, Cpu::Z80N, &Later(HashMap::from([("fwd", 3)])))
+            .unwrap_or_else(|| panic!("{source} is rejected"))
+            .warnings()
+            .any(|w| w == "looks like a non existent instruction")
+    };
+    let measured: Vec<&str> = LOOKS.lines().filter(|l| !l.starts_with('#')).collect();
+    let mut wrong = Vec::new();
+    for line in MEASURED.lines().filter(|l| !l.starts_with('#')) {
+        let Some((source, _)) = line.split_once('\t') else {
+            continue;
+        };
+        if lowered(source, Cpu::Z80N, &AtZero).is_some()
+            && warns(source) != measured.contains(&source)
+        {
+            wrong.push(source);
+        }
+    }
+    for (source, theirs) in LOOKS_MORE {
+        if warns(source) != *theirs {
+            wrong.push(source);
+        }
+    }
+    assert!(wrong.is_empty(), "the warning differs on {wrong:?}");
+    // Where only brackets mark an address, parentheses only group.
+    let brackets = Profile::PASMONEXT_0_1_3.with_brackets_only();
+    let lowered = lowered_in("ld b,(12h)", Cpu::Z80N, &AtZero, brackets).expect("lowers");
+    assert_eq!(lowered.warnings().count(), 0);
 }

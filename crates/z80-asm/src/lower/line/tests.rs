@@ -326,6 +326,11 @@ fn quirks_and_their_warnings_come_through() {
     // would read as an address.
     let lowered = one("ld b,(12h)", &Names::default()).expect("lowers");
     assert!(lowered.quirks.contains(&Quirk::ParenthesisedValue));
+    assert_eq!(
+        lowered.warnings().collect::<Vec<_>>(),
+        ["looks like a non existent instruction"]
+    );
+    let lowered = one("ld b,(1)+1", &Names::default()).expect("lowers");
     assert_eq!(lowered.warnings().count(), 0);
 }
 
