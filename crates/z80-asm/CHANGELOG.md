@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.3](https://github.com/lang198x/z80-asm/compare/lang198x-z80-asm-v0.2.2...lang198x-z80-asm-v0.2.3) - 2026-10-25
 
+Text after `ELSE`, `ENDIF` and `ENDM` is now rejected. PasmoNext 0.1.3 rejects
+it after an `ELSE` or `ENDIF` that it runs, which the expander used to accept.
+Where PasmoNext reaches one of these lines while skipping, and after any
+`ENDM`, it drops the text instead, which is one of its bugs, so the expander
+rejects that too. The new `Quirk::LooksLikeAnAddress` gives PasmoNext's
+documented "looks like a non existent instruction" warning for a byte value
+written in parentheses, such as `ld b,(12h)`, wherever PasmoNext gives it.
+
 ### Fixed
 
 - reject text after ELSE, ENDIF and ENDM, and warn as PasmoNext does about (n)
