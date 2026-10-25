@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3](https://github.com/lang198x/z80-asm/compare/lang198x-z80-asm-v0.2.2...lang198x-z80-asm-v0.2.3) - 2026-10-25
+
+### Fixed
+
+- reject text after ELSE, ENDIF and ENDM, and warn as PasmoNext does about (n)
+
 ## [0.2.2](https://github.com/lang198x/z80-asm/compare/lang198x-z80-asm-v0.2.1...lang198x-z80-asm-v0.2.2) - 2026-10-25
 
 The rest of PasmoNext 0.1.3's directives, and two more of its options, each
