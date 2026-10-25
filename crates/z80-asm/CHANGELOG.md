@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2](https://github.com/lang198x/z80-asm/compare/lang198x-z80-asm-v0.2.1...lang198x-z80-asm-v0.2.2) - 2026-10-25
+
+### Added
+
+- read PasmoNext's --bracket and --w8080 options
+- read the Next's ?? name, SETBANK and SAVEBIN
+- read PasmoNext's .ERROR, .WARNING, MESSAGE and HEX
+- read PasmoNext's structures, RB, RW, RSSET and STACK
+
 ## [0.2.1](https://github.com/lang198x/z80-asm/compare/lang198x-z80-asm-v0.2.0...lang198x-z80-asm-v0.2.1) - 2026-10-25
 
 PasmoNext's options that change what source means: `--nocase` is
