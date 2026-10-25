@@ -1,7 +1,7 @@
 # Plan: the Z80 family parser with a PasmoNext profile
 
 **Status:** Agreed 2026-10-23. Steps 1 to 4 are done; step 5's design is
-agreed, and 5c steps 1 and 2 are built.
+agreed, and 5c steps 1 to 3 are built.
 **Binding records:** Lang198x's
 [shared syntax layer decision](https://github.com/lang198x/lang198x/blob/main/decisions/shared-syntax-layer.md)
 and 198x's
@@ -529,6 +529,28 @@ Design agreed 2026-10-23.
     reading `ab$c` as `ac`. That is one of its bugs, not copied.
   - **Measured:** 56 programs with these options, recorded in Asm198x's
     fixture, all matching through the walk, and 26 `--equ` texts here.
+
+- **As built, 5c step 3, structures:** `STRUCT`/`ENDS`, `RB`, `RW`,
+  `RSSET` and `STACK`, which PasmoNext's manual does not describe, so each
+  rule was measured (80 programs, in Asm198x's fixture).
+  - **The expander reads a structure's body raw,** as `parseSTRUCT` does:
+    up to `ENDS`, each line goes to the host marked `in_struct`, and no macro,
+    conditional or repeat runs. Lowering reads each as a field: a name, then
+    `DB`, `DW` or `DS`, sized as PasmoNext sizes it (a string its bytes, any
+    other `DB` item 1, each `DW` item 2, `DS` its count, needed now).
+  - **Lowering reports a `Definition`,** since the values depend on earlier
+    lines: the structure, each field and its size, `ENDS`, each `RB` or `RW`
+    name and its size, `RSSET`'s value and `STACK`'s. Asm198x's walk gives
+    `name.field` its offset, `name` the structure's size, and each reserved
+    name the reserve counter.
+  - **Fixed rather than copied:** `RB` and `RW` take only a number, where
+    PasmoNext stops without a message on anything else; `RSSET` takes only
+    a number or nothing, where PasmoNext reads anything else as 0 or drops
+    the rest of the line; a field with no item or a trailing comma is
+    refused, where PasmoNext counts a phantom byte; text after `STRUCT`'s
+    name, `ENDS` or `STACK`'s value is refused. In Asm198x, the reserve
+    counter starts at 0 each pass, where PasmoNext's carries over and makes
+    `RB` without `RSSET` a phase error.
 
 ### 6. The gate, in Asm198x
 

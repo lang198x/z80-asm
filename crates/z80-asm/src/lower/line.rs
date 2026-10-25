@@ -36,6 +36,61 @@ pub struct Lowered {
     /// The change the line makes to the scopes names live in, made after
     /// its statements.
     pub scope: Option<Scope>,
+    /// A name the line defines that only the assembler can give a value, or
+    /// a value it sets for later lines: a structure or one of its fields, or
+    /// a name `RB` or `RW` reserves.
+    pub definition: Option<Definition>,
+}
+
+impl Lowered {
+    /// `items`, and nothing else.
+    pub(super) fn of(items: Vec<Item>) -> Self {
+        Self {
+            items,
+            quirks: Vec::new(),
+            scope: None,
+            definition: None,
+        }
+    }
+}
+
+/// What a structure, `RB`, `RW`, `RSSET` or `STACK` line defines or sets.
+///
+/// These are PasmoNext additions its manual does not describe; each rule was
+/// measured on PasmoNext 0.1.3. The values depend on lines before, which
+/// lowering does not keep, so the assembler gives them:
+///
+/// - between `STRUCT name` and `ENDS`, each field `name.field` is its offset,
+///   and at `ENDS`, `name` is the structure's size;
+/// - each `RB` or `RW` name is the reserve counter, which then moves on by its
+///   size; `RSSET` sets the counter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Definition {
+    /// `STRUCT name`: the lines up to `ENDS` are its fields.
+    Struct(String),
+    /// A field of the open structure: its own name, without the structure's,
+    /// and how many bytes it takes.
+    Field {
+        /// The field's name, such as `xx` in `xx db 0`.
+        name: String,
+        /// How many bytes the field takes.
+        size: i64,
+    },
+    /// `ENDS`: the open structure ends.
+    EndStruct,
+    /// `name RB n` or `name RW n`: `name` is the reserve counter, which moves
+    /// on by `size` bytes.
+    Reserve {
+        /// The name reserved.
+        name: String,
+        /// How many bytes it reserves: `n` for `RB`, `2n` for `RW`.
+        size: i64,
+    },
+    /// `RSSET n`: the reserve counter is now `n`.
+    ReserveFrom(i64),
+    /// `STACK n`: where a snapshot's stack starts. It changes no bytes.
+    Stack(i64),
 }
 
 /// A change to the scopes names live in, from `LOCAL`, `PROC`, `ENDP` or
@@ -119,30 +174,32 @@ pub fn line(
             .collect(),
         quirks: Vec::new(),
         scope: None,
+        definition: None,
     };
     if line.label_only() {
         return Ok(only_label());
+    }
+    if line.in_struct() {
+        return directive::field(syntax, profile, known)
+            .map(|definition| Lowered {
+                definition,
+                ..Lowered::of(Vec::new())
+            })
+            .map_err(|problem| at_line(line, problem));
     }
     let lowered = match syntax.statement() {
         None => Ok(only_label()),
         Some(Statement::Instruction(instruction)) => {
             instruction::lower(&instruction, profile, cpu, known).map(|lowered| Lowered {
-                items: vec![Item {
+                quirks: lowered.quirks,
+                ..Lowered::of(vec![Item {
                     label: label.clone(),
                     op: Some(lowered.op),
-                }],
-                quirks: lowered.quirks,
-                scope: None,
+                }])
             })
         }
         Some(Statement::Directive(d)) => {
-            directive::lower(&d, label.clone(), profile, known, binaries).map(|(items, scope)| {
-                Lowered {
-                    items,
-                    quirks: Vec::new(),
-                    scope,
-                }
-            })
+            directive::lower(&d, label.clone(), profile, known, binaries)
         }
         Some(Statement::MacroCall(call)) => Err(Problem::at(
             &call,
@@ -152,18 +209,21 @@ pub fn line(
             ),
         )),
     };
-    lowered.map_err(|problem| {
-        let range = TextRange::at(
-            problem
-                .range
-                .start()
-                .checked_add(line.offset())
-                .unwrap_or(problem.range.start()),
-            problem.range.len(),
-        )
-        .unwrap_or(problem.range);
-        Diagnostic::new(problem.kind, range, problem.message)
-    })
+    lowered.map_err(|problem| at_line(line, problem))
+}
+
+/// `problem`, found in `line`'s tree, as a diagnostic in the line's text.
+fn at_line(line: &ActiveLine, problem: Problem) -> Diagnostic {
+    let range = TextRange::at(
+        problem
+            .range
+            .start()
+            .checked_add(line.offset())
+            .unwrap_or(problem.range.start()),
+        problem.range.len(),
+    )
+    .unwrap_or(problem.range);
+    Diagnostic::new(problem.kind, range, problem.message)
 }
 
 #[cfg(test)]
