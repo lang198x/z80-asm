@@ -1,7 +1,7 @@
 # Plan: the Z80 family parser with a PasmoNext profile
 
 **Status:** Agreed 2026-10-23. Steps 1 to 4 are done; step 5's design is
-agreed, and 5c steps 1 to 3 are built.
+agreed, and 5c steps 1 to 4 are built.
 **Binding records:** Lang198x's
 [shared syntax layer decision](https://github.com/lang198x/lang198x/blob/main/decisions/shared-syntax-layer.md)
 and 198x's
@@ -551,6 +551,20 @@ Design agreed 2026-10-23.
     name, `ENDS` or `STACK`'s value is refused. In Asm198x, the reserve
     counter starts at 0 each pass, where PasmoNext's carries over and makes
     `RB` without `RSSET` a phase error.
+
+- **As built, 5c step 4, messages:** `.ERROR` stops the assembly with
+  ".ERROR directive: " and the rest of the line, comments included;
+  `.WARNING` and `MESSAGE` lower to a `Message` the assembler gives. A
+  `MESSAGE` is made of `Piece`s: text as PasmoNext spells it, or a value in
+  four hex digits, or in decimal after `%d`; the assembler evaluates them on
+  the last pass only, as PasmoNext does. `HEX` writes its bytes.
+  - **Fixed rather than copied:** PasmoNext gives a `.WARNING` once per
+    pass, so twice; Asm198x gives it once. `HEX` takes only an even run of
+    hex digits, where PasmoNext writes a garbage byte for a pair that is not
+    hex (`ZZ`), reads `0ABh` as `0A` and `Bh`, writes nothing for a string,
+    drops everything after its first word, and calls an odd count a SAVEBIN
+    failure.
+  - **Measured:** 46 programs, in Asm198x's fixture, and what each printed.
 
 ### 6. The gate, in Asm198x
 
