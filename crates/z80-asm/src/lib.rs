@@ -30,8 +30,10 @@ pub mod lower;
 #[cfg(test)]
 mod measured;
 mod parser;
+mod predefine;
 mod profile;
 
 pub use lexer::{Lexed, Token, lex};
 pub use parser::{ParseError, parse, parse_with_macros};
+pub use predefine::predefine;
 pub use profile::Profile;

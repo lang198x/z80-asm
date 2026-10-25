@@ -1,7 +1,7 @@
 # Plan: the Z80 family parser with a PasmoNext profile
 
 **Status:** Agreed 2026-10-23. Steps 1 to 4 are done; step 5's design is
-agreed, and 5c steps 1 and 2 (its directives) are built.
+agreed, and 5c steps 1 and 2 are built.
 **Binding records:** Lang198x's
 [shared syntax layer decision](https://github.com/lang198x/lang198x/blob/main/decisions/shared-syntax-layer.md)
 and 198x's
@@ -514,6 +514,21 @@ Design agreed 2026-10-23.
   - **One message differs:** for a `LOCAL` or `PUBLIC` operand that is not
     a name, PasmoNext prints only "Expected '", because its name for an
     identifier token is empty. Lowering gives the message it means.
+
+- **As built, 5c step 2, the options:** `--nocase` is a reading option,
+  `Profile::with_names_in_any_case`. Every name lowering gives, and every
+  name the expander matches (macros, their parameters, `REPT` counters,
+  `IRP` names), means its upper-case spelling, as PasmoNext's tokenizer
+  folds it. `--equ` texts are read by `predefine`, following `addpredef`.
+  `--alocal` is Asm198x's: its walk keeps the automatic scope. The
+  expander's host now hears each macro definition (`Host::macro_defined`),
+  which ends that scope.
+  - **`$` in names, fixed rather than copied:** the manual says the `$` in a
+    name are ignored, and names now mean their text without them, so `a$b`
+    is `ab`. PasmoNext 0.1.3's `stripdollar` removes the wrong characters,
+    reading `ab$c` as `ac`. That is one of its bugs, not copied.
+  - **Measured:** 56 programs with these options, recorded in Asm198x's
+    fixture, all matching through the walk, and 26 `--equ` texts here.
 
 ### 6. The gate, in Asm198x
 

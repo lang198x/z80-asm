@@ -77,7 +77,7 @@ checksum = "9c225ca928528a659aeecde8a98b005d57e60cda1442c93dd4884880b6d92d3a"
 
 [[package]]
 name = "lang198x-z80-asm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "asm198x-ir",
  "isa198x",

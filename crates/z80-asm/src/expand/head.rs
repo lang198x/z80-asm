@@ -73,7 +73,7 @@ pub(super) fn word(token: Option<&Tok>, grammar: &Grammar) -> Word {
                 Role::None if grammar.is_keyword(text) || grammar.is_reserved(text) => {
                     Word::Keyword
                 }
-                Role::None => Word::Name(text.to_owned()),
+                Role::None => Word::Name(grammar.name(text)),
                 role => Word::Block(role),
             }
         }

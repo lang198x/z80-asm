@@ -108,7 +108,7 @@ pub fn line(
     let label = syntax
         .label()
         .and_then(|label| label.name())
-        .map(|name| name.text().to_owned());
+        .map(|name| profile.grammar.name(name.text()));
     let only_label = || Lowered {
         items: label
             .iter()
