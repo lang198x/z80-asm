@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0](https://github.com/lang198x/z80-asm/compare/lang198x-z80-asm-v0.1.0...lang198x-z80-asm-v0.2.0) - 2026-10-25
 
+PasmoNext's obvious bugs are now fixed rather than copied, under 198x's
+[decision on reference bugs](https://github.com/stevehill1981/198x/blob/main/decisions/reference-bugs-are-fixed-not-copied.md).
+Source it miscompiles, such as `sbc hl,1234h`, `ld h,ixh` or `ret a`, is
+rejected with a message saying what PasmoNext 0.1.3 assembles. The Next's
+`push nn` is written high byte first, as the CPU reads it. `Quirk` loses the
+five variants that described those bugs. `LOCAL`, `PROC`, `ENDP` and `PUBLIC`
+now lower to a `Scope` for the assembler to keep.
+
 ### Added
 
 - report LOCAL, PROC, ENDP and PUBLIC as scope changes for the assembler
