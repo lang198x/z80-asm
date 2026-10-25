@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/lang198x/z80-asm/compare/lang198x-z80-asm-v0.1.0...lang198x-z80-asm-v0.2.0) - 2026-10-25
+
+### Added
+
+- report LOCAL, PROC, ENDP and PUBLIC as scope changes for the assembler
+
+### Fixed
+
+- [**breaking**] reject PasmoNext's miscompiles and write the Next's push nn high byte first
+
 ## [0.1.0](https://github.com/lang198x/z80-asm/releases/tag/lang198x-z80-asm-v0.1.0) - 2026-10-23
 
 The first release: a lossless parser for PasmoNext 0.1.3, the Z80 assembler
