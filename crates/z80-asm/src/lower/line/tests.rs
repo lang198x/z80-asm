@@ -324,9 +324,10 @@ fn a_problem_points_into_the_lines_text() {
 
 #[test]
 fn quirks_and_their_warnings_come_through() {
-    // `ret` swallows one token, which another assembler would not.
-    let lowered = one("ret 5", &Names::default()).expect("lowers");
-    assert!(lowered.quirks.contains(&Quirk::RetIgnoresOperand));
+    // A parenthesised value where no address fits, which another assembler
+    // would read as an address.
+    let lowered = one("ld b,(12h)", &Names::default()).expect("lowers");
+    assert!(lowered.quirks.contains(&Quirk::ParenthesisedValue));
     assert_eq!(lowered.warnings().count(), 0);
 }
 

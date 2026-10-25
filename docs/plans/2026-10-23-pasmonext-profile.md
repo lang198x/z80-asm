@@ -328,6 +328,22 @@ Design agreed 2026-10-23.
     `isa198x` gaps until they are filled) become `ComputedInstruction`
     pieces. A miscompile keeps PasmoNext's bytes, for the gate, and adds a
     warning that names what PasmoNext really assembled.
+  - **Amended 2026-10-25: the bugs are fixed, not copied.** Under 198x's
+    [decision on reference bugs](https://github.com/stevehill1981/198x/blob/main/decisions/reference-bugs-are-fixed-not-copied.md),
+    Steve reversed the choice above. The silent miscompiles, `ret` with a
+    word after it, and `push nn` with text after its value are now rejected,
+    each with a message saying what PasmoNext 0.1.3 assembles. `push nn` is
+    written high byte first, from `isa198x`'s form, as the Next reads it.
+    The parenthesised value stays: PasmoNext's manual documents it.
+    - **Checked:** the sweep still runs every line. It requires every
+      difference from PasmoNext to be one of the named bugs, and pins how
+      many lines show each: 693 of the 280,371, all invalid source except
+      the 8 `push nn` lines. Each bug in `REJECTED_BUGS` was measured on
+      PasmoNext again, alone. No curriculum program and no Asm198x verdict
+      source hits any of them.
+    - **Still to do under the same decision:** the measured text PasmoNext
+      ignores after `ELSE` and a repeat's `ENDM`; the warning PasmoNext
+      gives for `ld r,(n)`, which lowering does not give yet.
   - **Rejected alternative:** porting PasmoNext's instruction routines
     (`asm.cpp` lines 3751 to about 6600, around 60 routines) and emitting
     pieces for everything. It reproduces every quirk by construction,
@@ -539,7 +555,9 @@ What this asks of the steps here:
   comments and layout, instead of only the expanded program.
 - **Lowering names each quirk it applies,** as data, not only as warning
   text, so a porter knows what to rewrite: `ld b,(12h)` must become
-  `ld b,12h` where parentheses mean memory, and `ret a` must become `ret`.
+  `ld b,12h` where parentheses mean memory. Source that hits one of
+  PasmoNext's bugs, such as `ret a`, is rejected with a message naming what
+  PasmoNext assembled, so a porter knows what the author got.
 - **A port is checked by bytes.** The original, assembled through this
   profile, and the port, assembled through the target dialect, must give the
   same bytes. That is the same gate as step 6, run between two dialects.

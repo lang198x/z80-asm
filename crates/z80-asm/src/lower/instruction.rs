@@ -40,45 +40,55 @@ impl Lowered {
 /// Something PasmoNext 0.1.3 did with a line that another assembler might
 /// read differently. A tool that ports source to another assembler needs
 /// these, to know what to rewrite so the bytes stay the same.
+///
+/// PasmoNext's obvious bugs are not quirks. Source that hits one is
+/// rejected, with a message saying what PasmoNext would have done, under
+/// 198x's decision to fix reference assemblers' bugs rather than copy them.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Quirk {
     /// A value in parentheses was read as a value, because no address fits
-    /// there: `ld b,(12h)` is `ld b,12h`.
+    /// there: `ld b,(12h)` is `ld b,12h`. PasmoNext's manual documents this.
     ParenthesisedValue,
-    /// `ret` ignored the word after it: `ret a` is `ret`.
-    RetIgnoresOperand,
-    /// The Next's `push nn` ignored everything after its value.
-    PushIgnoresRest,
-    /// The Next's `push nn` wrote its value low byte first, though the Next
-    /// reads it high byte first.
-    PushLittleEndian,
-    /// Invalid source was assembled as a different instruction, named here,
-    /// such as `ADD HL,nn` for `sbc hl,1234h`.
-    AssembledAs(String),
-    /// An indexed instruction was written with no displacement byte, so the
-    /// Z80 reads the next byte as one.
-    MissingDisplacement,
 }
 
 impl Quirk {
     /// A warning, where PasmoNext writes code that does something other than
-    /// what the line says. A quirk that only reads the source loosely, such
-    /// as `ret a`, has none.
+    /// what the line says. None of the quirks lowering applies has one now.
     #[must_use]
     pub fn warning(&self) -> Option<String> {
         match self {
-            Self::AssembledAs(what) => Some(format!("PasmoNext 0.1.3 assembles this as {what}")),
-            Self::MissingDisplacement => Some(
-                "PasmoNext 0.1.3 assembles this as an indexed instruction with no displacement \
-                 byte, so the Z80 reads the next byte as the displacement"
-                    .to_owned(),
-            ),
-            Self::ParenthesisedValue
-            | Self::RetIgnoresOperand
-            | Self::PushIgnoresRest
-            | Self::PushLittleEndian => None,
+            Self::ParenthesisedValue => None,
         }
+    }
+}
+
+/// One of PasmoNext 0.1.3's obvious bugs, which lowering rejects rather than
+/// copies. Each was measured on PasmoNext.
+enum Bug {
+    /// Invalid source PasmoNext assembles as a different instruction, named
+    /// here, such as `ADD HL,nn` for `sbc hl,1234h`.
+    AssembledAs(String),
+    /// An indexed instruction PasmoNext writes with no displacement byte, so
+    /// the Z80 reads the next byte as one.
+    MissingDisplacement,
+    /// A word after `ret` that PasmoNext ignores: `ret a` is `ret`.
+    RetIgnoresOperand,
+    /// Text after the Next's `push nn` that PasmoNext ignores.
+    PushIgnoresRest,
+}
+
+impl Bug {
+    fn message(&self) -> String {
+        let what = match self {
+            Self::AssembledAs(real) => format!("assembles this as {real}"),
+            Self::MissingDisplacement => "writes this with no displacement byte, so the Z80 \
+                                          reads the next byte as the displacement"
+                .to_owned(),
+            Self::RetIgnoresOperand => "ignores the word after `ret` and assembles `ret`".into(),
+            Self::PushIgnoresRest => "ignores everything after `push`'s value".into(),
+        };
+        format!("this is not a Z80 instruction as written: PasmoNext 0.1.3 {what}")
     }
 }
 
@@ -231,6 +241,12 @@ impl Lowering<'_> {
         Problem::at(self.instruction, message)
     }
 
+    /// A rejection for one of PasmoNext's bugs, saying what it would have
+    /// assembled.
+    fn bug(&self, bug: &Bug) -> Problem {
+        self.problem(bug.message())
+    }
+
     // Dispatch.
 
     fn instruction(
@@ -289,15 +305,16 @@ impl Lowering<'_> {
             ("RL" | "RLC" | "RR" | "RRC" | "SLA" | "SRA" | "SLL" | "SRL", [Arg::Reg(reg)])
                 if index_half(reg).is_some() =>
             {
-                self.cb_index_half(rotate_code(mnemonic), reg)
+                // `dobyteparamCB` writes the prefix, `CB` and the code for
+                // `h` or `l`, with no displacement byte.
+                Err(self.bug(&Bug::MissingDisplacement))
             }
             ("BIT" | "RES" | "SET", [_, Arg::Reg(reg)]) if index_half(reg).is_some() => {
                 let bit = self.required(&self.bit_number(args)?)?;
-                let bit = u8::try_from(bit)
-                    .ok()
-                    .filter(|b| *b <= 7)
-                    .ok_or_else(|| self.problem("the bit number must be 0 to 7"))?;
-                self.cb_index_half(bit_code(mnemonic) + (bit << 3), reg)
+                if !(0..=7).contains(&bit) {
+                    return Err(self.problem("the bit number must be 0 to 7"));
+                }
+                Err(self.bug(&Bug::MissingDisplacement))
             }
             ("SLL", [Arg::Indexed { reg, disp }]) => Ok(sll_indexed(reg, disp)),
             ("SLL", [Arg::IndirectReg(reg)]) if reg == "IX" || reg == "IY" => Ok(sll_indexed(
@@ -492,10 +509,9 @@ impl Lowering<'_> {
         match args {
             [] => Ok(self.form("RET", "", Vec::new())),
             [Arg::Reg(reg)] if self.is_condition(reg) => Ok(self.form("RET", reg, Vec::new())),
-            [Arg::Reg(_)] | [Arg::Value { tokens: 1, .. }] => Ok(Lowered {
-                quirks: vec![Quirk::RetIgnoresOperand],
-                ..self.form("RET", "", Vec::new())
-            }),
+            [Arg::Reg(_)] | [Arg::Value { tokens: 1, .. }] => {
+                Err(self.bug(&Bug::RetIgnoresOperand))
+            }
             _ => Err(self.problem("PasmoNext takes at most one word after `ret`")),
         }
     }
@@ -509,8 +525,9 @@ impl Lowering<'_> {
     }
 
     /// `parsePUSHPOP`: on the Next, a number starts `push nn`. PasmoNext
-    /// writes the value little-endian (the Next reads it big-endian) and
-    /// ignores the rest of the line.
+    /// writes the value low byte first, though the Next reads it high byte
+    /// first, and ignores the rest of the line. Lowering writes it as the
+    /// Next reads it, from `isa198x`'s form, and rejects the rest.
     fn push_value(&self, args: &[Arg]) -> Result<Lowered, Problem> {
         let [Arg::Value { value, .. }, ..] = args else {
             return Err(self.problem("expected a value"));
@@ -519,23 +536,10 @@ impl Lowering<'_> {
             return Err(self.problem("`push` with a value is a Spectrum Next instruction"));
         }
         self.required(value)?;
-        let mut quirks = vec![Quirk::PushLittleEndian];
         if args.len() > 1 {
-            quirks.push(Quirk::PushIgnoresRest);
+            return Err(self.bug(&Bug::PushIgnoresRest));
         }
-        Ok(Lowered {
-            quirks,
-            op: Operation::ComputedInstruction(vec![
-                Piece::Lit(0xED),
-                Piece::Lit(0x8A),
-                Piece::Val {
-                    expr: value.clone(),
-                    bytes: 2,
-                    rel: false,
-                    signed: false,
-                },
-            ]),
-        })
+        Ok(self.form("PUSH", "nn", vec![value.clone()]))
     }
 
     /// `parseJP_`: after `jp`, a bracket is always an indirect jump, through
@@ -552,24 +556,21 @@ impl Lowering<'_> {
         }
     }
 
-    /// `parseLDdouble`: on the Next, `ld rr,sp` is `ED 25` whatever the
-    /// pair, and with no prefix for `ix` or `iy`.
+    /// `parseLDdouble`: on the Next, PasmoNext writes `ld rr,sp` as `ED 25`,
+    /// the Next's `LD HL,SP`, whatever the pair. Only `ld hl,sp` is that
+    /// instruction; the rest are rejected.
     fn ld_pair_sp(&self, dest: &str) -> Result<Lowered, Problem> {
-        let quirks = if dest == "HL" {
-            Vec::new()
-        } else {
-            vec![Quirk::AssembledAs("LD HL,SP".to_owned())]
-        };
-        Ok(Lowered {
-            quirks,
-            ..pieces(&[0xED, 0x25])
-        })
+        if dest != "HL" {
+            return Err(self.bug(&Bug::AssembledAs("LD HL,SP".to_owned())));
+        }
+        Ok(pieces(&[0xED, 0x25]))
     }
 
     /// `parseLDsimple`: an 8-bit load is `40h + (dest << 3) + src`, with
     /// the prefix of whichever side names a half of `ix` or `iy`. Nothing
-    /// checks the other side, so `ld h,ixh` is `LD IXH,IXH` and
-    /// `ld (hl),ixh` is `LD (IX+d),H` with no displacement byte.
+    /// in PasmoNext checks the other side, so it writes `ld h,ixh` as
+    /// `LD IXH,IXH` and `ld (hl),ixh` as `LD (IX+d),H` with no displacement
+    /// byte. Lowering rejects both.
     fn ld_index_half(&self, dest: &Arg, src: &Arg, args: &[Arg]) -> Result<Lowered, Problem> {
         let code = |arg: &Arg| match arg {
             Arg::Reg(r) => register_code(r).or_else(|| index_half(r).map(|(_, code)| code)),
@@ -595,10 +596,7 @@ impl Lowering<'_> {
             if prefixes.0.is_some() {
                 return Err(self.problem("`(hl)` cannot be loaded into a half of `ix` or `iy`"));
             }
-            return Ok(Lowered {
-                quirks: vec![Quirk::MissingDisplacement],
-                ..pieces(&[prefix, 0x70 + src_code])
-            });
+            return Err(self.bug(&Bug::MissingDisplacement));
         }
         let real = |c: u8| matches!(c, 4 | 5);
         let both_halves = prefixes.0.is_some() && prefixes.1.is_some();
@@ -619,20 +617,17 @@ impl Lowering<'_> {
             (3, _) => "E",
             _ => "A",
         };
-        Ok(Lowered {
-            quirks: vec![Quirk::AssembledAs(format!(
-                "LD {},{}",
-                name(dest_code),
-                name(src_code)
-            ))],
-            ..pieces(&[prefix, 0x40 + (dest_code << 3) + src_code])
-        })
+        Err(self.bug(&Bug::AssembledAs(format!(
+            "LD {},{}",
+            name(dest_code),
+            name(src_code)
+        ))))
     }
 
-    /// `parseADDADCSBCHL`: after `hl`, `ix` or `iy`, an `a` is always the
-    /// Next's `ADD HL,A` (`ED 31`), and a value starting with a number, `-`
-    /// or a name is always its `ADD HL,nn` (`ED 34`), whatever the
-    /// instruction and register.
+    /// `parseADDADCSBCHL`: after `hl`, `ix` or `iy`, PasmoNext writes an `a`
+    /// as the Next's `ADD HL,A` (`ED 31`), and a value starting with a
+    /// number, `-` or a name as its `ADD HL,nn` (`ED 34`), whatever the
+    /// instruction and register. Lowering takes only `add hl,…`.
     fn add_pair(
         &self,
         mnemonic: &str,
@@ -642,26 +637,25 @@ impl Lowering<'_> {
     ) -> Result<Lowered, Problem> {
         let next = self.cpu == Cpu::Z80N;
         // The Next's ADD HL,A and ADD HL,nn, whatever was written.
-        let what = |real: &str| {
-            if mnemonic == "ADD" && dest == "HL" {
-                Vec::new()
-            } else {
-                vec![Quirk::AssembledAs(real.to_owned())]
-            }
-        };
+        let real = mnemonic == "ADD" && dest == "HL";
         match second {
-            Arg::Reg(a) if a == "A" && next => Ok(Lowered {
-                quirks: what("ADD HL,A"),
-                ..pieces(&[0xED, 0x31])
-            }),
+            Arg::Reg(a) if a == "A" && next => {
+                if !real {
+                    return Err(self.bug(&Bug::AssembledAs("ADD HL,A".to_owned())));
+                }
+                Ok(pieces(&[0xED, 0x31]))
+            }
             Arg::Reg(_) => self.matched(mnemonic, &[], args),
             Arg::Value { value, first, .. } => {
                 if !next || !matches!(*first, Some(kinds::NUMBER | kinds::MINUS | kinds::IDENT)) {
                     return Err(self.problem("PasmoNext takes a number, `-` or a name here"));
                 }
                 self.required(value)?;
+                if !real {
+                    return Err(self.bug(&Bug::AssembledAs("ADD HL,nn".to_owned())));
+                }
                 Ok(Lowered {
-                    quirks: what("ADD HL,nn"),
+                    quirks: Vec::new(),
                     op: Operation::ComputedInstruction(vec![
                         Piece::Lit(0xED),
                         Piece::Lit(0x34),
@@ -710,19 +704,6 @@ impl Lowering<'_> {
             }
             _ => Err(self.problem("PasmoNext takes a number or a name after `nextreg`")),
         }
-    }
-
-    /// `dobyteparamCB`: a rotate or bit instruction on a half of `ix` or
-    /// `iy` is the prefix, `CB` and the code for `h` or `l`, with no
-    /// displacement byte, which the Z80 then reads from the next byte.
-    fn cb_index_half(&self, code: u8, reg: &str) -> Result<Lowered, Problem> {
-        let Some((prefix, reg_code)) = index_half(reg) else {
-            return Err(self.problem("expected a half of `ix` or `iy`"));
-        };
-        Ok(Lowered {
-            quirks: vec![Quirk::MissingDisplacement],
-            ..pieces(&[prefix, 0xCB, code + reg_code])
-        })
     }
 
     fn bit_number(&self, args: &[Arg]) -> Result<Ir, Problem> {
@@ -941,19 +922,6 @@ fn is_pair(reg: &str) -> bool {
 
 fn is_index_half(arg: &Arg) -> bool {
     matches!(arg, Arg::Reg(reg) if index_half(reg).is_some())
-}
-
-fn rotate_code(mnemonic: &str) -> u8 {
-    match mnemonic {
-        "RLC" => 0x00,
-        "RRC" => 0x08,
-        "RL" => 0x10,
-        "RR" => 0x18,
-        "SLA" => 0x20,
-        "SRA" => 0x28,
-        "SLL" => 0x30,
-        _ => 0x38,
-    }
 }
 
 fn bit_code(mnemonic: &str) -> u8 {

@@ -1,13 +1,51 @@
 //! Instructions lowered, then encoded the way the back end encodes them, and
 //! compared with what PasmoNext 0.1.3 wrote.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use isa198x::OperandKind as Kind;
 
 use super::*;
 use crate::ast::{Line, SourceFile, Statement};
 use crate::parse;
+
+/// The swept lines where lowering deliberately differs from PasmoNext 0.1.3,
+/// because the difference is one of its bugs: what the rejection says, or
+/// the corrected bytes, and how many swept lines show it. A count that moves
+/// fails the sweep, so the list stays true.
+const SWEPT_DEVIATIONS: &[(&str, usize)] = &[
+    ("assembles this as ADD HL,A", 4),
+    ("assembles this as ADD HL,nn", 36),
+    ("assembles this as LD HL,SP", 4),
+    ("assembles this as LD I", 16),
+    ("with no displacement byte", 100),
+    ("ignores everything after `push`'s value", 495),
+    ("ignores the word after `ret`", 30),
+    ("push nn high byte first", 8),
+];
+
+/// Which of [`SWEPT_DEVIATIONS`] explains `source` giving `ours` where
+/// PasmoNext gave `theirs`, if any.
+fn deviation(source: &str, theirs: Option<&str>, ours: Option<&str>) -> Option<&'static str> {
+    match (theirs, ours) {
+        // The Next's `push nn`: the same bytes with the value swapped round.
+        (Some(theirs), Some(ours))
+            if theirs.len() == 8
+                && theirs.starts_with("ed8a")
+                && ours == format!("ed8a{}{}", &theirs[6..8], &theirs[4..6]) =>
+        {
+            Some("push nn high byte first")
+        }
+        (Some(_), None) => {
+            let message = rejection(source)?;
+            SWEPT_DEVIATIONS
+                .iter()
+                .map(|(kind, _)| *kind)
+                .find(|kind| message.contains("PasmoNext 0.1.3") && message.contains(kind))
+        }
+        _ => None,
+    }
+}
 
 /// Nothing defined, at address 0, as the sweep was measured.
 struct AtZero;
@@ -203,6 +241,7 @@ fn every_swept_line_gets_pasmonexts_verdict_and_bytes() {
     assert_eq!(vocab.len(), 55);
     let mut lines = 0;
     let mut wrong = Vec::new();
+    let mut deviations: BTreeMap<&str, usize> = BTreeMap::new();
     for mnemonic in &mnemonics {
         let mut sources = vec![mnemonic.clone()];
         sources.extend(vocab.iter().map(|a| format!("{mnemonic} {a}")));
@@ -215,11 +254,21 @@ fn every_swept_line_gets_pasmonexts_verdict_and_bytes() {
                 .map(|bytes| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>());
             let theirs = measured.get(source.as_str()).map(|hex| (*hex).to_owned());
             if ours != theirs {
-                wrong.push(format!("{source}: PasmoNext {theirs:?}, lowered {ours:?}"));
+                match deviation(&source, theirs.as_deref(), ours.as_deref()) {
+                    Some(kind) => *deviations.entry(kind).or_default() += 1,
+                    None => {
+                        wrong.push(format!("{source}: PasmoNext {theirs:?}, lowered {ours:?}"));
+                    }
+                }
             }
         }
     }
     assert_eq!(lines, 280_371);
+    let expected: BTreeMap<&str, usize> = SWEPT_DEVIATIONS.iter().copied().collect();
+    assert_eq!(
+        deviations, expected,
+        "PasmoNext's bugs, as the sweep finds them"
+    );
     assert!(
         wrong.is_empty(),
         "{} of {lines} differ:\n{}",
@@ -348,6 +397,8 @@ fn a_plain_z80_takes_everything_but_the_nexts_instructions() {
             .collect();
         if is_next(&bytes) {
             assert_eq!(z80, None, "{source} is a Next instruction");
+        } else if deviation(source, Some(measured), z80.as_deref()).is_some() {
+            // One of PasmoNext's bugs, which the sweep counts.
         } else {
             assert_eq!(z80.as_deref(), Some(measured), "{source}");
         }
@@ -355,42 +406,20 @@ fn a_plain_z80_takes_everything_but_the_nexts_instructions() {
 }
 
 #[test]
-fn a_miscompile_keeps_pasmonexts_bytes_and_says_what_they_are() {
-    let warning =
-        |source: &str| lowered(source, Cpu::Z80N, &AtZero).and_then(|l| l.warnings().next());
-    for (source, expected) in [
-        (
-            "sbc hl,1234h",
-            "PasmoNext 0.1.3 assembles this as ADD HL,nn",
-        ),
-        ("adc hl,a", "PasmoNext 0.1.3 assembles this as ADD HL,A"),
-        (
-            "add ix,1234h",
-            "PasmoNext 0.1.3 assembles this as ADD HL,nn",
-        ),
-        ("ld h,ixh", "PasmoNext 0.1.3 assembles this as LD IXH,IXH"),
-        ("ld iyl,l", "PasmoNext 0.1.3 assembles this as LD IYL,IYL"),
-        ("ld de,sp", "PasmoNext 0.1.3 assembles this as LD HL,SP"),
-    ] {
-        assert_eq!(warning(source).as_deref(), Some(expected), "{source}");
-    }
-    for source in ["ld (hl),ixh", "bit 0,ixh", "rl iyl"] {
-        assert!(
-            warning(source).is_some_and(|w| w.contains("no displacement byte")),
-            "{source}"
-        );
-    }
-    // What is right stays quiet.
+fn what_is_right_assembles_without_a_warning() {
+    // Beside the bugs in `REJECTED_BUGS`, the same instructions written
+    // correctly assemble, and say nothing.
     for source in [
         "add hl,1234h",
         "add hl,a",
         "ld hl,sp",
         "ld b,ixh",
         "ld ixh,ixl",
-        "ret a",
         "sll (ix+5)",
     ] {
-        assert_eq!(warning(source), None, "{source}");
+        let lowered =
+            lowered(source, Cpu::Z80N, &AtZero).unwrap_or_else(|| panic!("{source} is rejected"));
+        assert_eq!(lowered.warnings().next(), None, "{source}");
     }
 }
 
@@ -401,24 +430,8 @@ fn each_quirk_is_named_for_a_tool_that_ports_the_source() {
             .map(|l| l.quirks)
             .unwrap_or_default()
     };
-    for (source, expected) in [
-        ("ld b,(12h)", vec![Quirk::ParenthesisedValue]),
-        ("ld b,(1)+1", vec![Quirk::ParenthesisedValue]),
-        ("jp nz,(1234h)", vec![Quirk::ParenthesisedValue]),
-        ("ret a", vec![Quirk::RetIgnoresOperand]),
-        ("push 1234h", vec![Quirk::PushLittleEndian]),
-        (
-            "push 1234h,b",
-            vec![Quirk::PushLittleEndian, Quirk::PushIgnoresRest],
-        ),
-        ("sbc hl,a", vec![Quirk::AssembledAs("ADD HL,A".to_owned())]),
-        (
-            "ld h,iyl",
-            vec![Quirk::AssembledAs("LD IYH,IYL".to_owned())],
-        ),
-        ("set 7,ixl", vec![Quirk::MissingDisplacement]),
-    ] {
-        assert_eq!(quirks(source), expected, "{source}");
+    for source in ["ld b,(12h)", "ld b,(1)+1", "jp nz,(1234h)"] {
+        assert_eq!(quirks(source), [Quirk::ParenthesisedValue], "{source}");
     }
     // Lines another assembler reads the same way carry none.
     for source in [
@@ -428,7 +441,76 @@ fn each_quirk_is_named_for_a_tool_that_ports_the_source() {
         "jp (hl)",
         "add hl,a",
         "ld (ix+5),12h",
+        "push 1234h",
     ] {
         assert!(quirks(source).is_empty(), "{source}");
     }
+}
+
+/// `source`'s rejection message, if lowering rejects it.
+fn rejection(source: &str) -> Option<String> {
+    let text = format!(" {source}\n");
+    let parse = parse(&text, Profile::PASMONEXT_0_1_3).ok()?;
+    let line: Line = SourceFile::cast(parse.tree().root())?.lines().next()?;
+    let Some(Statement::Instruction(instruction)) = line.statement() else {
+        return None;
+    };
+    lower(&instruction, &Profile::PASMONEXT_0_1_3, Cpu::Z80N, &AtZero)
+        .err()
+        .map(|problem| problem.message)
+}
+
+/// PasmoNext 0.1.3's obvious bugs, which lowering rejects rather than
+/// copies: each line, the bytes PasmoNext wrote for it, measured at org 0,
+/// and what the rejection says it did.
+pub(super) const REJECTED_BUGS: &[(&str, &str, &str)] = &[
+    ("ret a", "c9", "ignores the word after `ret`"),
+    ("ret 5", "c9", "ignores the word after `ret`"),
+    (
+        "push 1234h,b",
+        "ed8a3412",
+        "ignores everything after `push`'s value",
+    ),
+    ("sbc hl,a", "ed31", "assembles this as ADD HL,A"),
+    ("adc hl,a", "ed31", "assembles this as ADD HL,A"),
+    ("sbc hl,1234h", "ed343412", "assembles this as ADD HL,nn"),
+    ("add ix,1234h", "ed343412", "assembles this as ADD HL,nn"),
+    ("ld de,sp", "ed25", "assembles this as LD HL,SP"),
+    ("ld h,iyl", "fd65", "assembles this as LD IYH,IYL"),
+    ("ld h,ixh", "dd64", "assembles this as LD IXH,IXH"),
+    ("ld iyl,l", "fd6d", "assembles this as LD IYL,IYL"),
+    ("ld (hl),ixh", "dd74", "with no displacement byte"),
+    ("set 7,ixl", "ddcbfd", "with no displacement byte"),
+    ("bit 0,ixh", "ddcb44", "with no displacement byte"),
+    ("rl ixh", "ddcb14", "with no displacement byte"),
+];
+
+#[test]
+fn pasmonexts_bugs_are_rejected_saying_what_it_would_have_done() {
+    let measured: HashMap<&str, &str> = MEASURED
+        .lines()
+        .filter_map(|line| line.split_once('\t'))
+        .collect();
+    for &(source, bytes, says) in REJECTED_BUGS {
+        // The sweep measured most of these; the rest were measured alone.
+        if let Some(theirs) = measured.get(source) {
+            assert_eq!(*theirs, bytes, "{source}: the recorded bytes");
+        }
+        let message = rejection(source).unwrap_or_else(|| panic!("{source} is accepted"));
+        assert!(message.contains("PasmoNext 0.1.3"), "{source}: {message}");
+        assert!(message.contains(says), "{source}: {message}");
+    }
+}
+
+#[test]
+fn the_nexts_push_nn_is_written_high_byte_first() {
+    // The Next reads `PUSH nn` as `ED 8A` and the value high byte first
+    // (198x reference, zx-spectrum-modern-development.md). PasmoNext 0.1.3
+    // writes it low byte first, `ED 8A 34 12`; that bug is not copied.
+    assert_eq!(
+        assemble("push 1234h", Cpu::Z80N)
+            .map(|b| hex(&b))
+            .as_deref(),
+        Some("ed8a1234")
+    );
 }
