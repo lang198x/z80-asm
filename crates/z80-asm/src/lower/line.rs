@@ -48,7 +48,10 @@ pub struct Lowered {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Message {
-    /// `.WARNING text`: a warning, with the text as written.
+    /// A warning: the text of `.WARNING text` as written, or PasmoNext's
+    /// "not a 8080 instruction", which a profile made by
+    /// [`with_8080_warnings`](Profile::with_8080_warnings) gives each
+    /// instruction the 8080 lacks.
     Warning(String),
     /// `MESSAGE items`: a line made of these pieces, printed on the last
     /// pass only, as PasmoNext prints it.
@@ -71,6 +74,9 @@ pub enum Piece {
         decimal: bool,
     },
 }
+
+/// PasmoNext's warning for an instruction the 8080 lacks.
+const NOT_8080: &str = "not a 8080 instruction";
 
 impl Lowered {
     /// `items`, and nothing else.
@@ -245,6 +251,8 @@ pub fn line(
         Some(Statement::Instruction(instruction)) => {
             instruction::lower(&instruction, profile, cpu, known).map(|lowered| Lowered {
                 quirks: lowered.quirks,
+                message: (profile.warns_8080() && !instruction::is_8080(&lowered.op, cpu))
+                    .then(|| Message::Warning(NOT_8080.to_owned())),
                 ..Lowered::of(vec![Item {
                     label: label.clone(),
                     op: Some(lowered.op),

@@ -24,9 +24,27 @@ const SWEPT_DEVIATIONS: &[(&str, usize)] = &[
     ("push nn high byte first", 8),
 ];
 
+/// [`SWEPT_DEVIATIONS`] with `--bracket`, which rejects the four among them
+/// that indirect through parentheses: `ld (hl),ixh` and the like.
+const SWEPT_DEVIATIONS_BRACKET: &[(&str, usize)] = &[
+    ("assembles this as ADD HL,A", 4),
+    ("assembles this as ADD HL,nn", 36),
+    ("assembles this as LD HL,SP", 4),
+    ("assembles this as LD I", 16),
+    ("with no displacement byte", 96),
+    ("ignores everything after `push`'s value", 495),
+    ("ignores the word after `ret`", 30),
+    ("push nn high byte first", 8),
+];
+
 /// Which of [`SWEPT_DEVIATIONS`] explains `source` giving `ours` where
 /// PasmoNext gave `theirs`, if any.
-fn deviation(source: &str, theirs: Option<&str>, ours: Option<&str>) -> Option<&'static str> {
+fn deviation(
+    source: &str,
+    profile: Profile,
+    theirs: Option<&str>,
+    ours: Option<&str>,
+) -> Option<&'static str> {
     match (theirs, ours) {
         // The Next's `push nn`: the same bytes with the value swapped round.
         (Some(theirs), Some(ours))
@@ -37,7 +55,7 @@ fn deviation(source: &str, theirs: Option<&str>, ours: Option<&str>) -> Option<&
             Some("push nn high byte first")
         }
         (Some(_), None) => {
-            let message = rejection(source)?;
+            let message = rejection_in(source, profile)?;
             SWEPT_DEVIATIONS
                 .iter()
                 .map(|(kind, _)| *kind)
@@ -90,8 +108,14 @@ fn assemble(source: &str, cpu: Cpu) -> Option<Vec<u8>> {
 
 /// `source` lowered, or `None` if parsing or lowering rejects it.
 fn lowered(source: &str, cpu: Cpu, known: &dyn Known) -> Option<Lowered> {
+    lowered_in(source, cpu, known, Profile::PASMONEXT_0_1_3)
+}
+
+/// `source` lowered under `profile`, or `None` if parsing or lowering
+/// rejects it.
+fn lowered_in(source: &str, cpu: Cpu, known: &dyn Known, profile: Profile) -> Option<Lowered> {
     let text = format!(" {source}\n");
-    let parse = parse(&text, Profile::PASMONEXT_0_1_3).ok()?;
+    let parse = parse(&text, profile).ok()?;
     if !parse.diagnostics().is_empty() {
         return None;
     }
@@ -99,7 +123,7 @@ fn lowered(source: &str, cpu: Cpu, known: &dyn Known) -> Option<Lowered> {
     let Some(Statement::Instruction(instruction)) = line.statement() else {
         return None;
     };
-    lower(&instruction, &Profile::PASMONEXT_0_1_3, cpu, known).ok()
+    lower(&instruction, &profile, cpu, known).ok()
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -229,9 +253,17 @@ fn script_lists() -> (Vec<String>, Vec<String>) {
     (mnemonics, vocab)
 }
 
-#[test]
-fn every_swept_line_gets_pasmonexts_verdict_and_bytes() {
-    let measured: HashMap<&str, &str> = MEASURED
+/// What PasmoNext accepted with `--bracket`, with its bytes.
+const MEASURED_BRACKET: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/data/pasmonext-0.1.3-instructions-bracket.tsv"
+));
+
+/// Every swept line lowered under `profile` and encoded, against `measured`:
+/// the lines that differ for no named reason, and how many show each named
+/// deviation.
+fn sweep(profile: Profile, measured: &str) -> (Vec<String>, BTreeMap<&'static str, usize>) {
+    let measured: HashMap<&str, &str> = measured
         .lines()
         .filter(|line| !line.starts_with('#'))
         .filter_map(|line| line.split_once('\t'))
@@ -250,11 +282,12 @@ fn every_swept_line_gets_pasmonexts_verdict_and_bytes() {
         }
         for source in sources {
             lines += 1;
-            let ours = assemble(&source, Cpu::Z80N)
-                .map(|bytes| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>());
+            let ours = lowered_in(&source, Cpu::Z80N, &AtZero, profile)
+                .and_then(|l| encode(&l.op, &|_| None))
+                .map(|bytes| hex(&bytes));
             let theirs = measured.get(source.as_str()).map(|hex| (*hex).to_owned());
             if ours != theirs {
-                match deviation(&source, theirs.as_deref(), ours.as_deref()) {
+                match deviation(&source, profile, theirs.as_deref(), ours.as_deref()) {
                     Some(kind) => *deviations.entry(kind).or_default() += 1,
                     None => {
                         wrong.push(format!("{source}: PasmoNext {theirs:?}, lowered {ours:?}"));
@@ -264,14 +297,19 @@ fn every_swept_line_gets_pasmonexts_verdict_and_bytes() {
         }
     }
     assert_eq!(lines, 280_371);
-    let expected: BTreeMap<&str, usize> = SWEPT_DEVIATIONS.iter().copied().collect();
+    (wrong, deviations)
+}
+
+fn assert_swept(profile: Profile, measured: &str, expected: &[(&str, usize)]) {
+    let (wrong, deviations) = sweep(profile, measured);
+    let expected: BTreeMap<&str, usize> = expected.iter().copied().collect();
     assert_eq!(
         deviations, expected,
         "PasmoNext's bugs, as the sweep finds them"
     );
     assert!(
         wrong.is_empty(),
-        "{} of {lines} differ:\n{}",
+        "{} differ:\n{}",
         wrong.len(),
         wrong
             .iter()
@@ -279,6 +317,20 @@ fn every_swept_line_gets_pasmonexts_verdict_and_bytes() {
             .cloned()
             .collect::<Vec<_>>()
             .join("\n")
+    );
+}
+
+#[test]
+fn every_swept_line_gets_pasmonexts_verdict_and_bytes() {
+    assert_swept(Profile::PASMONEXT_0_1_3, MEASURED, SWEPT_DEVIATIONS);
+}
+
+#[test]
+fn with_brackets_only_every_swept_line_gets_pasmonexts_verdict_and_bytes() {
+    assert_swept(
+        Profile::PASMONEXT_0_1_3.with_brackets_only(),
+        MEASURED_BRACKET,
+        SWEPT_DEVIATIONS_BRACKET,
     );
 }
 
@@ -397,7 +449,14 @@ fn a_plain_z80_takes_everything_but_the_nexts_instructions() {
             .collect();
         if is_next(&bytes) {
             assert_eq!(z80, None, "{source} is a Next instruction");
-        } else if deviation(source, Some(measured), z80.as_deref()).is_some() {
+        } else if deviation(
+            source,
+            Profile::PASMONEXT_0_1_3,
+            Some(measured),
+            z80.as_deref(),
+        )
+        .is_some()
+        {
             // One of PasmoNext's bugs, which the sweep counts.
         } else {
             assert_eq!(z80.as_deref(), Some(measured), "{source}");
@@ -449,13 +508,18 @@ fn each_quirk_is_named_for_a_tool_that_ports_the_source() {
 
 /// `source`'s rejection message, if lowering rejects it.
 fn rejection(source: &str) -> Option<String> {
+    rejection_in(source, Profile::PASMONEXT_0_1_3)
+}
+
+/// `source`'s rejection message under `profile`, if lowering rejects it.
+fn rejection_in(source: &str, profile: Profile) -> Option<String> {
     let text = format!(" {source}\n");
-    let parse = parse(&text, Profile::PASMONEXT_0_1_3).ok()?;
+    let parse = parse(&text, profile).ok()?;
     let line: Line = SourceFile::cast(parse.tree().root())?.lines().next()?;
     let Some(Statement::Instruction(instruction)) = line.statement() else {
         return None;
     };
-    lower(&instruction, &Profile::PASMONEXT_0_1_3, Cpu::Z80N, &AtZero)
+    lower(&instruction, &profile, Cpu::Z80N, &AtZero)
         .err()
         .map(|problem| problem.message)
 }
@@ -513,4 +577,90 @@ fn the_nexts_push_nn_is_written_high_byte_first() {
             .as_deref(),
         Some("ed8a1234")
     );
+}
+
+/// The accepted lines PasmoNext 0.1.3 gave no warning under `--w8080`.
+const QUIET_8080: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/data/pasmonext-0.1.3-8080.tsv"
+));
+
+/// The swept lines where the 8080 warning deliberately differs from
+/// PasmoNext 0.1.3's: the 8080's `OUT (n),A`, which it warns about, and the
+/// Next's `JP (C)`, which it does not.
+const WARNING_DEVIATIONS: &[&str] = &[
+    "jp (c)",
+    "jp [c]",
+    "out (1234h),a",
+    "out (12h),a",
+    "out [1234h],a",
+];
+
+#[test]
+fn the_8080_warning_falls_on_the_z80s_additions() {
+    let quiet: Vec<&str> = QUIET_8080
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect();
+    let mut wrong = Vec::new();
+    let mut deviating = Vec::new();
+    for line in MEASURED.lines().filter(|line| !line.starts_with('#')) {
+        let Some((source, _)) = line.split_once('\t') else {
+            continue;
+        };
+        // PasmoNext's bugs are rejected, so they have no warning to give.
+        let Some(lowered) = lowered(source, Cpu::Z80N, &AtZero) else {
+            continue;
+        };
+        let theirs = quiet.contains(&source);
+        if is_8080(&lowered.op, Cpu::Z80N) != theirs {
+            if WARNING_DEVIATIONS.contains(&source) {
+                deviating.push(source);
+            } else {
+                wrong.push(source);
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "the warning differs on {wrong:?}");
+    assert_eq!(deviating, WARNING_DEVIATIONS);
+}
+
+/// Measured on PasmoNext 0.1.3 with `--bracket`, at org 0; `None` where it
+/// rejected the line.
+const BRACKETS_ONLY: &[(&str, Option<&str>)] = &[
+    ("ld a,(1)+1", Some("3e02")),
+    ("jp (1)+1", Some("c30200")),
+    ("ld a,(1+1)", Some("3e02")),
+    ("ld b,(12h)", Some("0612")),
+    ("ld [hl],(5)", Some("3605")),
+    ("add a,(3)*2", Some("c606")),
+    ("ld hl,(5)+1", Some("210600")),
+    ("ex [sp],hl", Some("e3")),
+    ("call (5)", Some("cd0500")),
+    ("ld a,[(1)+1]", Some("3a0200")),
+    ("out [(1)],a", Some("d301")),
+    ("rst (8)", Some("cf")),
+    ("im (1)", Some("ed56")),
+    ("bit (1),a", Some("cb4f")),
+    ("ld [ix+(1)],a", Some("dd7701")),
+    ("djnz ($)", Some("10fe")),
+    ("ld (1)+1,a", None),
+    ("push (5)", None),
+    ("ex (sp),hl", None),
+    ("ld b,[12h]", None),
+];
+
+#[test]
+fn with_brackets_only_parentheses_only_group() {
+    let profile = Profile::PASMONEXT_0_1_3.with_brackets_only();
+    for (source, bytes) in BRACKETS_ONLY {
+        let lowered = lowered_in(source, Cpu::Z80N, &AtZero, profile);
+        let ours = lowered
+            .as_ref()
+            .and_then(|l| encode(&l.op, &|_| None))
+            .map(|b| hex(&b));
+        assert_eq!(ours.as_deref(), *bytes, "{source}");
+        // Grouping is not a quirk where parentheses mean nothing else.
+        assert!(lowered.is_none_or(|l| l.quirks.is_empty()), "{source}");
+    }
 }

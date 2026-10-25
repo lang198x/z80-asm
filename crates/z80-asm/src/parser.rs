@@ -331,7 +331,7 @@ impl Parser<'_> {
     }
 
     /// Operands separated by commas. An instruction operand that starts with
-    /// `(`, or `[` if the profile allows it, is an indirection, unless more of
+    /// `(` or `[`, each if the profile allows it, is an indirection, unless more of
     /// the operand follows the closing `)`: then the parentheses group an
     /// expression, as in `ld b,(1)+1`. PasmoNext reads such an operand again
     /// as an expression wherever the instruction has no memory form for it;
@@ -344,7 +344,9 @@ impl Parser<'_> {
             self.trivia();
             self.builder.start_node(kinds::OPERAND);
             let opens = match self.current() {
-                Some(kinds::L_PAREN) => !self.group_continues(),
+                Some(kinds::L_PAREN) => {
+                    self.profile.grammar.paren_indirection && !self.group_continues()
+                }
                 Some(kinds::L_BRACK) => self.profile.grammar.bracket_indirection,
                 _ => false,
             };

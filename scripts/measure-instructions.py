@@ -6,9 +6,11 @@ written with the bytes PasmoNext wrote. The vocabulary and mnemonics must
 match the sweep test in crates/z80-asm/src/lower/instruction/tests.rs, which
 treats every unlisted line as rejected.
 
-Usage: SWEEP_TMP=<scratch dir> python3 measure-instructions.py <out.tsv>
+Usage: SWEEP_TMP=<scratch dir> python3 measure-instructions.py <out.tsv> [option]
 Needs PasmoNext 0.1.3 on the PATH as `pasmo`. The output is sorted and given
-a header to become crates/z80-asm/tests/data/pasmonext-0.1.3-instructions.tsv.
+a header to become crates/z80-asm/tests/data/pasmonext-0.1.3-instructions.tsv,
+or with --bracket given as the option,
+crates/z80-asm/tests/data/pasmonext-0.1.3-instructions-bracket.tsv.
 """
 import os, subprocess, sys, tempfile, itertools
 from multiprocessing import Pool
@@ -20,6 +22,8 @@ VOCAB = ["a","b","c","d","e","h","l","i","r","ixh","ixl","iyh","iyl",
     "(hl)","(bc)","(de)","(sp)","(c)","(ix)","(iy)","(ix+5)","(iy+5)","(ix-5)",
     "[hl]","[c]","[ix+5]","[1234h]","(12h)","(1234h)",
     "0","1","2","7","8","10h","38h","12h","1234h","$+7"]
+
+OPTIONS = sys.argv[2:]
 
 def lines():
     for m in MNEMONICS:
@@ -34,7 +38,7 @@ def run(line):
     src, out = os.path.join(d, "t.asm"), os.path.join(d, "t.bin")
     with open(src, "w") as f:
         f.write(f" org 0\n {line}\n")
-    subprocess.run(["pasmo", src, out], capture_output=True, timeout=10)
+    subprocess.run(["pasmo", *OPTIONS, src, out], capture_output=True, timeout=10)
     result = open(out, "rb").read().hex() if os.path.exists(out) else None
     for p in (src, out):
         if os.path.exists(p):
