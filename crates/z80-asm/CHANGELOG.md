@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1](https://github.com/lang198x/z80-asm/compare/lang198x-z80-asm-v0.2.0...lang198x-z80-asm-v0.2.1) - 2026-10-25
+
+### Added
+
+- read names in any case, ignore $ in them, and read --equ texts
+
 ## [0.2.0](https://github.com/lang198x/z80-asm/compare/lang198x-z80-asm-v0.1.0...lang198x-z80-asm-v0.2.0) - 2026-10-25
 
 PasmoNext's obvious bugs are now fixed rather than copied, under 198x's
