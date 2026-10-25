@@ -581,6 +581,25 @@ Design agreed 2026-10-23.
     does not start with a number or a name, saves nothing when its size does
     not, and drops what follows the size; each is refused.
 
+- **As built, 5c step 6, the reading options:** `Profile::with_brackets_only`
+  for `--bracket` and `Profile::with_8080_warnings` for `--w8080`.
+  - **`--bracket`:** `(` never opens an indirection, so parentheses only
+    group a value and are no quirk. The instruction sweep was measured again
+    under it (2,038 of the 280,371 lines accepted, in
+    `pasmonext-0.1.3-instructions-bracket.tsv`), and 20 more lines on top.
+    Every line matches, apart from the bugs the plain sweep names; four of
+    those, `ld (hl),ixh` and the like, are rejected outright here.
+  - **`--w8080`:** the warning is a `Message::Warning` on the lowered line.
+    It falls on the Z80's additions to the 8080, which its first byte names:
+    `08`, `10`, `18` to `38`, `D9` and the `CB`, `DD`, `ED` and `FD` groups.
+    Measured on every accepted line of the sweep (the quiet ones are in
+    `pasmonext-0.1.3-8080.tsv`).
+  - **Fixed rather than copied:** PasmoNext warns about `OUT (n),A`, which
+    is the 8080's `OUT`, and not about the Next's `JP (C)`.
+  - **Also fixed:** under `--bracket`, `push nn` followed by something that
+    is no longer an operand, such as `push 0,(hl)`, is still the "ignores
+    everything after" bug, since the value is read before anything after it.
+
 ### 6. The gate, in Asm198x
 
 Pull requests to `asm198x/asm198x`, after publishing `lang198x-z80-asm`.

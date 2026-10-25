@@ -45,9 +45,14 @@ const FILES: &[(&str, &[u8])] = &[("data.bin", &[0x01, 0x02, 0xFF])];
 
 /// Each line of `source` that reaches lowering, lowered with `names`.
 fn lower_all(source: &str, names: &Names) -> Vec<Result<Lowered, Diagnostic>> {
-    let program =
-        Program::load("t.asm", source, Profile::PASMONEXT_0_1_3, |_| None).expect("loads");
-    let mut expander = Expander::new(program, Profile::PASMONEXT_0_1_3).expect("parses");
+    lower_with(source, names, Profile::PASMONEXT_0_1_3)
+}
+
+/// Each line of `source` that reaches lowering, lowered with `names` under
+/// `profile`.
+fn lower_with(source: &str, names: &Names, profile: Profile) -> Vec<Result<Lowered, Diagnostic>> {
+    let program = Program::load("t.asm", source, profile, |_| None).expect("loads");
+    let mut expander = Expander::new(program, profile).expect("parses");
     let mut binaries = |name: &str| {
         FILES
             .iter()
@@ -56,13 +61,7 @@ fn lower_all(source: &str, names: &Names) -> Vec<Result<Lowered, Diagnostic>> {
     };
     let mut lowered = Vec::new();
     while let Some(active) = expander.next_line(&mut Every) {
-        lowered.push(line(
-            &active,
-            &Profile::PASMONEXT_0_1_3,
-            Cpu::Z80,
-            names,
-            &mut binaries,
-        ));
+        lowered.push(line(&active, &profile, Cpu::Z80, names, &mut binaries));
     }
     lowered
 }
@@ -808,4 +807,25 @@ fn setbank_and_savebin_are_reported_for_the_assembler() {
         .remove(0)
         .expect("lowers");
     assert_eq!(lowered.items[0].label.as_deref(), Some("here"));
+}
+
+#[test]
+fn with_8080_warnings_each_z80_instruction_is_warned_about() {
+    let warning = |text: &str, profile: Profile| {
+        lower_with(&format!(" {text}\n"), &Names::default(), profile)
+            .remove(0)
+            .unwrap_or_else(|d| panic!("{text}: {}", d.message()))
+            .message
+    };
+    let warns = Profile::PASMONEXT_0_1_3.with_8080_warnings();
+    let not_8080 = Some(Message::Warning("not a 8080 instruction".into()));
+    for text in ["djnz $", "exx", "ld ix,0", "bit 0,a", "ld a,i", "jr nz,$"] {
+        assert_eq!(warning(text, warns), not_8080, "{text}");
+        assert_eq!(warning(text, Profile::PASMONEXT_0_1_3), None, "{text}");
+    }
+    for text in ["ld a,b", "out (12h),a", "in a,(12h)", "jp (hl)", "ex de,hl"] {
+        assert_eq!(warning(text, warns), None, "{text}");
+    }
+    // Directives are not instructions, so they have no warning.
+    assert_eq!(warning("db 0", warns), None);
 }

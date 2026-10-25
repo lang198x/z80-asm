@@ -114,6 +114,15 @@ pub(crate) fn lower(
         cpu,
         known,
     };
+    let mut args = operands.iter().map(|operand| lowering.arg(operand));
+    // The Next's `push nn`: PasmoNext reads nothing after the value, so
+    // whatever follows it is the bug, not an operand to check.
+    if mnemonic == "PUSH"
+        && let Some(Ok(Arg::Value { value, first, .. })) = args.next()
+        && first == Some(kinds::NUMBER)
+    {
+        return lowering.push_value(&value, operands.len() > 1);
+    }
     let args = operands
         .iter()
         .map(|operand| lowering.arg(operand))
@@ -258,16 +267,17 @@ impl Lowering<'_> {
         let next = self.cpu == Cpu::Z80N;
         match (mnemonic, args) {
             ("RET", _) => self.ret(args),
-            ("PUSH", [Arg::Value { first, .. }, ..]) if *first == Some(kinds::NUMBER) => {
-                self.push_value(args)
-            }
             // `parsePUSHPOP` takes a register pair, or on the Next a number;
             // nothing else, so `push (5)` and `push label` are rejected. (No
             // `POP` form takes a value, so the matcher rejects those.)
             ("PUSH", [first, ..]) if !matches!(first, Arg::Reg(_)) => {
                 Err(self.problem("PasmoNext takes a register pair here, or a number on the Next"))
             }
-            ("JP", [first, ..]) if starts_with_paren(operands, first) => self.jp_indirect(args),
+            ("JP", [first, ..])
+                if starts_with_paren(operands, first, self.profile.grammar.paren_indirection) =>
+            {
+                self.jp_indirect(args)
+            }
             ("LD", [Arg::Reg(dest), Arg::Reg(sp)]) if next && sp == "SP" && is_pair(dest) => {
                 self.ld_pair_sp(dest)
             }
@@ -342,8 +352,10 @@ impl Lowering<'_> {
         // An operand such as `(1)+1` is a value only where the instruction has
         // no memory form for it; where it has one, PasmoNext reads `(` as the
         // start of an address and rejects what follows the `)` (its routines
-        // take `(` to the address path before any expression).
-        for (index, operand) in operands.iter().enumerate() {
+        // take `(` to the address path before any expression). Where only
+        // brackets mark an address, parentheses only ever group.
+        let paren_indirection = self.profile.grammar.paren_indirection;
+        for (index, operand) in operands.iter().enumerate().filter(|_| paren_indirection) {
             if let Some(Arg::Value { .. }) = args.get(index)
                 && grouped(operand)
             {
@@ -376,7 +388,7 @@ impl Lowering<'_> {
                 )
             })
         })?;
-        grouped_value |= operands.iter().any(grouped);
+        grouped_value |= paren_indirection && operands.iter().any(grouped);
         Ok(Lowered {
             op: Operation::Instruction {
                 mnemonic: mnemonic.to_owned(),
@@ -392,10 +404,7 @@ impl Lowering<'_> {
     }
 
     fn sets(&self) -> (&'static InstructionSet, Option<&'static InstructionSet>) {
-        match self.cpu {
-            Cpu::Z80 => (&z80::SET, None),
-            Cpu::Z80N => (&z80::SET, Some(&z80::NEXT)),
-        }
+        sets(self.cpu)
     }
 
     fn knows(&self, mnemonic: &str) -> bool {
@@ -528,15 +537,12 @@ impl Lowering<'_> {
     /// writes the value low byte first, though the Next reads it high byte
     /// first, and ignores the rest of the line. Lowering writes it as the
     /// Next reads it, from `isa198x`'s form, and rejects the rest.
-    fn push_value(&self, args: &[Arg]) -> Result<Lowered, Problem> {
-        let [Arg::Value { value, .. }, ..] = args else {
-            return Err(self.problem("expected a value"));
-        };
+    fn push_value(&self, value: &Ir, more: bool) -> Result<Lowered, Problem> {
         if self.cpu != Cpu::Z80N {
             return Err(self.problem("`push` with a value is a Spectrum Next instruction"));
         }
         self.required(value)?;
-        if args.len() > 1 {
+        if more {
             return Err(self.bug(&Bug::PushIgnoresRest));
         }
         Ok(self.form("PUSH", "nn", vec![value.clone()]))
@@ -806,6 +812,46 @@ impl Lowering<'_> {
     }
 }
 
+/// The instruction sets `cpu` has: the Z80's, and the Next's additions.
+fn sets(cpu: Cpu) -> (&'static InstructionSet, Option<&'static InstructionSet>) {
+    match cpu {
+        Cpu::Z80 => (&z80::SET, None),
+        Cpu::Z80N => (&z80::SET, Some(&z80::NEXT)),
+    }
+}
+
+/// Whether `op`, an instruction lowered for `cpu`, is one the 8080 has.
+///
+/// The Z80 kept the 8080's opcodes and added its own in the gaps the 8080
+/// left: `08` (`EX AF,AF'`), `10` (`DJNZ`), `18` to `38` (`JR`), `D9` (`EXX`),
+/// and the `CB`, `DD`, `ED` and `FD` groups, where the Next's instructions
+/// live too. So the first byte says which an instruction is.
+///
+/// PasmoNext 0.1.3 decides instruction by instruction, and gets two wrong:
+/// it warns about `OUT (n),A`, which is the 8080's `OUT` (`D3`), and not
+/// about the Next's `JP (C)` (`ED 98`). Those two follow the rule here.
+pub(super) fn is_8080(op: &Operation, cpu: Cpu) -> bool {
+    let first = match op {
+        Operation::Instruction { mnemonic, mode, .. } => {
+            let (set, ext) = sets(cpu);
+            set.find_form(mnemonic, mode)
+                .or_else(|| ext.and_then(|e| e.find_form(mnemonic, mode)))
+                .and_then(|form| form.opcode.first().copied())
+        }
+        Operation::ComputedInstruction(pieces) => match pieces.first() {
+            Some(Piece::Lit(byte)) => Some(*byte),
+            _ => None,
+        },
+        _ => None,
+    };
+    !first.is_some_and(|byte| {
+        matches!(
+            byte,
+            0x08 | 0x10 | 0x18 | 0x20 | 0x28 | 0x30 | 0x38 | 0xCB | 0xD9 | 0xDD | 0xED | 0xFD
+        )
+    })
+}
+
 /// The tokens of `node` that carry meaning.
 pub(super) fn meaningful_tokens(node: &lang198x_syntax::SyntaxNode) -> Vec<SyntaxToken> {
     node.descendants()
@@ -829,12 +875,13 @@ fn grouped(operand: &ast::Operand) -> bool {
 }
 
 /// Whether the first operand is in brackets of either kind, as an
-/// indirection or as a value that starts with a group.
-fn starts_with_paren(operands: &[ast::Operand], first: &Arg) -> bool {
+/// indirection or, where `(` can open one, as a value that starts with a
+/// group.
+fn starts_with_paren(operands: &[ast::Operand], first: &Arg, paren_indirection: bool) -> bool {
     matches!(
         first,
         Arg::IndirectReg(_) | Arg::Indexed { .. } | Arg::Address { .. }
-    ) || operands.first().is_some_and(grouped)
+    ) || (paren_indirection && operands.first().is_some_and(grouped))
 }
 
 fn index_register(token: &Option<SyntaxToken>) -> Option<&'static str> {

@@ -29,6 +29,8 @@ pub struct Profile {
     version: &'static str,
     pub(crate) lexical: Lexical,
     pub(crate) grammar: Grammar,
+    /// Whether an instruction the 8080 lacks gets a warning.
+    pub(crate) warns_8080: bool,
 }
 
 /// How a dialect splits text into tokens.
@@ -97,6 +99,8 @@ pub(crate) struct Grammar {
     /// brackets, `[hl]`, as well as parentheses. Brackets never group an
     /// expression.
     pub(crate) bracket_indirection: bool,
+    /// Whether `(` opens an indirection, as well as grouping a value.
+    pub(crate) paren_indirection: bool,
     /// Register names, in lower case. They are reserved: none can be a label
     /// or a macro parameter.
     pub(crate) registers: &'static [&'static str],
@@ -541,6 +545,7 @@ impl Profile {
             nul: Some("NUL"),
             index_registers: &["ix", "iy"],
             bracket_indirection: true,
+            paren_indirection: true,
             registers: PASMONEXT_REGISTERS,
             conditions: &["nz", "z", "nc", "c", "po", "pe", "p", "m"],
             current_address_words: &["PC"],
@@ -551,6 +556,7 @@ impl Profile {
             name_ignores: Some('$'),
             names_ignore_case: false,
         },
+        warns_8080: false,
     };
 
     /// Returns the profile's identifier, such as `pasmonext-0.1.3`.
@@ -593,6 +599,54 @@ impl Profile {
     #[must_use]
     pub const fn names_in_any_case(self) -> bool {
         self.grammar.names_ignore_case
+    }
+
+    /// The same profile, where only brackets mark an indirection, as
+    /// PasmoNext's `--bracket` option makes it. Parentheses then only group
+    /// a value: `ld a,[1234h]` loads from memory and `ld a,(12h)` is
+    /// `ld a,12h`, while `ld a,(hl)` is rejected.
+    ///
+    /// ```
+    /// use lang198x_z80_asm::Profile;
+    ///
+    /// let profile = Profile::PASMONEXT_0_1_3.with_brackets_only();
+    /// assert!(profile.brackets_only());
+    /// assert!(!Profile::PASMONEXT_0_1_3.brackets_only());
+    /// ```
+    #[must_use]
+    pub const fn with_brackets_only(mut self) -> Self {
+        self.grammar.paren_indirection = false;
+        self
+    }
+
+    /// Whether only brackets mark an indirection.
+    #[must_use]
+    pub const fn brackets_only(self) -> bool {
+        !self.grammar.paren_indirection
+    }
+
+    /// The same profile, warning about each instruction the 8080 lacks, as
+    /// PasmoNext's `--w8080` option does. These are the Z80's additions: the
+    /// `CB`, `DD`, `ED` and `FD` groups, `EX AF,AF'`, `EXX`, `DJNZ` and `JR`,
+    /// and the Next's instructions.
+    ///
+    /// ```
+    /// use lang198x_z80_asm::Profile;
+    ///
+    /// let profile = Profile::PASMONEXT_0_1_3.with_8080_warnings();
+    /// assert!(profile.warns_8080());
+    /// assert!(!Profile::PASMONEXT_0_1_3.warns_8080());
+    /// ```
+    #[must_use]
+    pub const fn with_8080_warnings(mut self) -> Self {
+        self.warns_8080 = true;
+        self
+    }
+
+    /// Whether each instruction the 8080 lacks gets a warning.
+    #[must_use]
+    pub const fn warns_8080(self) -> bool {
+        self.warns_8080
     }
 
     /// The name `text` means when written as a name: without the characters
