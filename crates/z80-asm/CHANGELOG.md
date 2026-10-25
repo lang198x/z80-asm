@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.1](https://github.com/lang198x/z80-asm/compare/lang198x-z80-asm-v0.2.0...lang198x-z80-asm-v0.2.1) - 2026-10-25
 
+PasmoNext's options that change what source means: `--nocase` is
+`Profile::with_names_in_any_case`, `--equ` texts are read by `predefine`, and
+`Host::macro_defined` lets an assembler keep `--alocal`'s scope. Names now
+ignore any `$` in them, as PasmoNext's manual says; PasmoNext 0.1.3 itself
+reads `ab$c` as `ac`, which is a bug and is not copied.
+
 ### Added
 
 - read names in any case, ignore $ in them, and read --equ texts
