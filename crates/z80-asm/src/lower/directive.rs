@@ -8,7 +8,7 @@ use asm198x_ir::{Expr as Ir, Operation};
 
 use super::expr::{self, Known, Problem};
 use super::instruction::{low_byte, meaningful_tokens};
-use super::{Definition, Item, Lowered, Scope};
+use super::{Definition, Item, Lowered, Message, Piece, Scope};
 use lang198x_syntax::SyntaxToken;
 
 use crate::ast::{self, Operand, View};
@@ -126,6 +126,21 @@ pub(super) fn lower(
                 ..label_only()
             }
         }
+        // `parse_ERROR`: the text, as written, stops the assembly.
+        ".ERROR" => {
+            return Err(lowering.problem(format!(".ERROR directive: {}", lowering.raw_text())));
+        }
+        // `parse_WARNING`: PasmoNext gives the warning on every pass, so twice;
+        // the assembler gives it once.
+        ".WARNING" => Lowered {
+            message: Some(Message::Warning(lowering.raw_text())),
+            ..label_only()
+        },
+        "MESSAGE" => Lowered {
+            message: Some(Message::Print(lowering.message()?)),
+            ..label_only()
+        },
+        "HEX" => item(Some(Operation::Bytes(lowering.hex()?))),
         // `parseSTACK`: a value PasmoNext needs as it reads the line.
         "STACK" => {
             lowering.some()?;
@@ -350,6 +365,104 @@ impl Lowering<'_> {
                 },
             )
             .sum()
+    }
+
+    /// A `.ERROR` or `.WARNING` directive's text, to the end of the line,
+    /// comments included, as PasmoNext's `parsemessage` takes it.
+    fn raw_text(&self) -> String {
+        self.directive
+            .text()
+            .map_or_else(String::new, |text| text.text().to_owned())
+    }
+
+    /// `parseMESSAGE`: items separated by commas, each one token, after an
+    /// optional `%d` for decimal.
+    fn message(&self) -> Result<Vec<Piece>, Problem> {
+        let tokens = self
+            .directive
+            .text()
+            .map(|text| meaningful_tokens(text.syntax()))
+            .unwrap_or_default();
+        let format = || self.problem("Error in Message format");
+        let mut pieces = Vec::new();
+        let mut decimal = false;
+        let mut at = 0;
+        while let Some(token) = tokens.get(at) {
+            if token.kind() == kinds::PERCENT {
+                // `%` and the word after it: `d` asks for decimal.
+                decimal = tokens
+                    .get(at + 1)
+                    .is_some_and(|word| word.text().eq_ignore_ascii_case("d"));
+                at += 2;
+                continue;
+            }
+            let text = token.text();
+            let grammar = &self.profile.grammar;
+            let address = text == "$" || text.eq_ignore_ascii_case("PC");
+            let piece = if address {
+                Piece::Value {
+                    value: Ir::Pc,
+                    decimal,
+                }
+            } else if token.kind() == kinds::IDENT
+                && !grammar.is_reserved(text)
+                && !grammar.is_keyword(text)
+            {
+                Piece::Value {
+                    value: Ir::Sym(grammar.name(text)),
+                    decimal,
+                }
+            } else if token.kind() == kinds::STRING {
+                let bytes = string_bytes(text, &self.profile.lexical).unwrap_or_default();
+                Piece::Text(bytes.iter().map(|&b| char::from(b)).collect())
+            } else if token.kind() == kinds::NUMBER {
+                let value = number_value(text, &self.profile.lexical).unwrap_or(0);
+                Piece::Text(format!("{:04X}", value & 0xFFFF))
+            } else {
+                Piece::Text(text.to_ascii_uppercase())
+            };
+            pieces.push(piece);
+            decimal = false;
+            match tokens.get(at + 1) {
+                None => break,
+                Some(next) if next.kind() == kinds::COMMA => at += 2,
+                Some(_) => return Err(format()),
+            }
+        }
+        Ok(pieces)
+    }
+
+    /// `parseHEX`: one word of hex digits, two to a byte. PasmoNext writes a
+    /// garbage byte for a pair that is not hex, nothing for a number such
+    /// as `0ABh` that is not a name, and drops what follows the word; under
+    /// 198x's decision on reference bugs, only an even run of hex digits is
+    /// taken. As in a name, `$` is ignored.
+    fn hex(&self) -> Result<Vec<Ir>, Problem> {
+        let text = self.raw_text();
+        let word = text
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .split("//")
+            .next()
+            .unwrap_or_default()
+            .trim();
+        let digits: Vec<char> = word.chars().filter(|&c| c != '$').collect();
+        if !digits.iter().all(char::is_ascii_hexdigit) {
+            return Err(self.problem("`HEX` takes hex digits only, two to a byte"));
+        }
+        if !digits.len().is_multiple_of(2) {
+            return Err(self.problem("`HEX` takes an even number of hex digits"));
+        }
+        Ok(digits
+            .chunks(2)
+            .map(|pair| {
+                let byte = pair
+                    .iter()
+                    .fold(0, |n, c| n * 16 + c.to_digit(16).unwrap_or(0));
+                Ir::Num(i64::from(byte))
+            })
+            .collect())
     }
 
     /// The one operand, if it is a number written alone.

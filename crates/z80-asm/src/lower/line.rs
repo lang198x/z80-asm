@@ -40,6 +40,36 @@ pub struct Lowered {
     /// a value it sets for later lines: a structure or one of its fields, or
     /// a name `RB` or `RW` reserves.
     pub definition: Option<Definition>,
+    /// What the line asks the assembler to tell whoever runs it.
+    pub message: Option<Message>,
+}
+
+/// What a `.WARNING` or `MESSAGE` line asks the assembler to say.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Message {
+    /// `.WARNING text`: a warning, with the text as written.
+    Warning(String),
+    /// `MESSAGE items`: a line made of these pieces, printed on the last
+    /// pass only, as PasmoNext prints it.
+    Print(Vec<Piece>),
+}
+
+/// One item of a `MESSAGE` line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Piece {
+    /// Text printed as it is: a string's contents, or a word or number as
+    /// PasmoNext spells it, such as `A` or `000A`.
+    Text(String),
+    /// A value printed in four hex digits, or in decimal after `%d`: a name,
+    /// or `$` or `PC`, the line's address.
+    Value {
+        /// The value, for the assembler to evaluate on the last pass.
+        value: Ir,
+        /// Whether `%d` asked for decimal.
+        decimal: bool,
+    },
 }
 
 impl Lowered {
@@ -50,6 +80,7 @@ impl Lowered {
             quirks: Vec::new(),
             scope: None,
             definition: None,
+            message: None,
         }
     }
 }
@@ -175,6 +206,7 @@ pub fn line(
         quirks: Vec::new(),
         scope: None,
         definition: None,
+        message: None,
     };
     if line.label_only() {
         return Ok(only_label());

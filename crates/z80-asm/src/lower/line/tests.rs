@@ -257,9 +257,9 @@ fn end_gives_the_entry_point_it_names() {
 
 #[test]
 fn directives_not_lowered_yet_say_so_and_fmessage_is_rejected() {
-    let message = rejected("message 1", &Names::default());
-    assert_eq!(message.kind(), DiagnosticKind::Unsupported);
-    assert_eq!(message.message(), "`MESSAGE` is not lowered yet");
+    let setbank = rejected("setbank 1", &Names::default());
+    assert_eq!(setbank.kind(), DiagnosticKind::Unsupported);
+    assert_eq!(setbank.message(), "`SETBANK` is not lowered yet");
     let fmessage = rejected("fmessage", &Names::default());
     assert_eq!(fmessage.kind(), DiagnosticKind::Invalid);
 }
@@ -611,4 +611,84 @@ fn rb_rw_rsset_and_stack_take_only_what_pasmonext_reads() {
         definitions(" RB 1\n")[0],
         Err("EQU without label".to_owned())
     );
+}
+
+#[test]
+fn messages_are_reported_for_the_assembler_to_give() {
+    let message = |text: &str| {
+        one(text, &Names::default())
+            .unwrap_or_else(|d| panic!("{text}: {}", d.message()))
+            .message
+    };
+    assert_eq!(
+        message(".WARNING careful ; now"),
+        Some(Message::Warning("careful ; now".into()))
+    );
+    assert_eq!(message(".WARNING"), Some(Message::Warning(String::new())));
+    let value = |name: &str, decimal| Piece::Value {
+        value: Ir::Sym(name.into()),
+        decimal,
+    };
+    assert_eq!(
+        message("MESSAGE \"v=\",vv,%d ww,$,PC,10,a,'q'"),
+        Some(Message::Print(vec![
+            Piece::Text("v=".into()),
+            value("vv", false),
+            value("ww", true),
+            Piece::Value {
+                value: Ir::Pc,
+                decimal: false
+            },
+            Piece::Value {
+                value: Ir::Pc,
+                decimal: false
+            },
+            Piece::Text("000A".into()),
+            Piece::Text("A".into()),
+            Piece::Text("q".into()),
+        ]))
+    );
+    assert_eq!(message("MESSAGE"), Some(Message::Print(Vec::new())));
+    // message_no_comma and message_expression.
+    for text in ["MESSAGE \"a\" \"b\"", "MESSAGE vv+1"] {
+        assert_eq!(
+            rejected(text, &Names::default()).message(),
+            "Error in Message format",
+            "{text}"
+        );
+    }
+    // error_basic and error_with_comment.
+    assert_eq!(
+        rejected(".ERROR bad ; here", &Names::default()).message(),
+        ".ERROR directive: bad ; here"
+    );
+    assert_eq!(
+        rejected(".ERROR", &Names::default()).message(),
+        ".ERROR directive: "
+    );
+}
+
+#[test]
+fn hex_writes_pairs_of_hex_digits() {
+    // hex_letters, hex_digits, hex_mixed, hex_lowercase, hex_dollar_digits.
+    for (text, bytes) in [
+        ("HEX ABCD", "abcd"),
+        ("HEX 0A0B", "0a0b"),
+        ("HEX ab12 ; note", "ab12"),
+        ("HEX A$B", "ab"),
+        ("HEX", ""),
+    ] {
+        assert_eq!(data(&op(text), &none()), bytes, "{text}");
+    }
+    // hex_odd, hex_non_hex, hex_with_h, hex_two_items, hex_junk, hex_string.
+    for text in [
+        "HEX ABC",
+        "HEX ZZ",
+        "HEX 0ABh",
+        "HEX AB,CD",
+        "HEX AB junk",
+        "HEX \"AB\"",
+    ] {
+        rejected(text, &Names::default());
+    }
 }
