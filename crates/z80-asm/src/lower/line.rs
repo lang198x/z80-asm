@@ -85,7 +85,8 @@ impl Lowered {
     }
 }
 
-/// What a structure, `RB`, `RW`, `RSSET` or `STACK` line defines or sets.
+/// What a structure, `RB`, `RW`, `RSSET`, `STACK`, `SETBANK` or `SAVEBIN`
+/// line defines or sets.
 ///
 /// These are PasmoNext additions its manual does not describe; each rule was
 /// measured on PasmoNext 0.1.3. The values depend on lines before, which
@@ -122,6 +123,26 @@ pub enum Definition {
     ReserveFrom(i64),
     /// `STACK n`: where a snapshot's stack starts. It changes no bytes.
     Stack(i64),
+    /// `SETBANK address, bank`: from here, the 8K slot holding `address`
+    /// holds memory bank `bank`. Each name defined after records the bank of
+    /// its value's slot, for `??`. Both values read as PasmoNext reads an
+    /// ordinary operand, and may be defined further on.
+    Bank {
+        /// An address in the slot.
+        address: Ir,
+        /// The bank the slot holds.
+        bank: Ir,
+    },
+    /// `SAVEBIN "file", start, size`: write `size` bytes of memory from
+    /// `start` to `file`, on the last pass, as memory stands at that line.
+    SaveBinary {
+        /// The file's name, without its quotes.
+        file: String,
+        /// The first address written.
+        start: Ir,
+        /// How many bytes are written.
+        size: Ir,
+    },
 }
 
 /// A change to the scopes names live in, from `LOCAL`, `PROC`, `ENDP` or

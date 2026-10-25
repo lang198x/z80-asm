@@ -256,10 +256,9 @@ fn end_gives_the_entry_point_it_names() {
 }
 
 #[test]
-fn directives_not_lowered_yet_say_so_and_fmessage_is_rejected() {
-    let setbank = rejected("setbank 1", &Names::default());
-    assert_eq!(setbank.kind(), DiagnosticKind::Unsupported);
-    assert_eq!(setbank.message(), "`SETBANK` is not lowered yet");
+fn fmessage_is_rejected() {
+    // PasmoNext's tokenizer knows the word, but no routine handles it. Every
+    // other directive is lowered here or run by the expander.
     let fmessage = rejected("fmessage", &Names::default());
     assert_eq!(fmessage.kind(), DiagnosticKind::Invalid);
 }
@@ -691,4 +690,122 @@ fn hex_writes_pairs_of_hex_digits() {
     ] {
         rejected(text, &Names::default());
     }
+}
+
+/// Names in banks, at address 0.
+struct Banked;
+
+impl Known for Banked {
+    fn defined(&self, _: &str) -> bool {
+        true
+    }
+
+    fn value(&self, _: &str) -> Option<i64> {
+        Some(0)
+    }
+
+    fn pc(&self) -> Option<i64> {
+        Some(0)
+    }
+
+    fn bank(&self, name: &str) -> Option<i64> {
+        (name == "aa").then_some(10)
+    }
+}
+
+#[test]
+fn a_bank_is_a_whole_operand_the_assembler_answers() {
+    // getbank_space, getbank_in_ld, getbank_in_dw, getbank_in_parens.
+    let bytes = |text: &str| {
+        let mut all = {
+            let program = Program::load(
+                "t.asm",
+                &format!(" {text}\n"),
+                Profile::PASMONEXT_0_1_3,
+                |_| None,
+            )
+            .expect("loads");
+            let mut expander = Expander::new(program, Profile::PASMONEXT_0_1_3).expect("parses");
+            let mut lines = Vec::new();
+            while let Some(active) = expander.next_line(&mut Every) {
+                lines.push(line(
+                    &active,
+                    &Profile::PASMONEXT_0_1_3,
+                    Cpu::Z80N,
+                    &Banked,
+                    &mut |_| None,
+                ));
+            }
+            lines
+        };
+        all.remove(0)
+    };
+    let op_of = |text: &str| {
+        bytes(text)
+            .unwrap_or_else(|d| panic!("{text}: {}", d.message()))
+            .items
+            .remove(0)
+            .op
+            .expect("an operation")
+    };
+    assert_eq!(data(&op_of("db ?? aa"), &none()), "0a");
+    assert_eq!(data(&op_of("db (?? aa)+1"), &none()), "0b");
+    assert_eq!(data(&op_of("dw ?? aa"), &none()), "0a00");
+    // getbank_negated and getbank_in_expression: only at the top. The
+    // parser reads `?? aa` as the whole operand, so `+1` is left over.
+    assert!(bytes("db -?? aa").is_err());
+    let parse = crate::parse(" db ?? aa+1\n", Profile::PASMONEXT_0_1_3).expect("parses");
+    assert!(!parse.diagnostics().is_empty());
+    // getbank_number, getbank_paren, getbank_dollar.
+    for text in ["db ?? 5", "db ?? (aa)", "db ?? $"] {
+        let parse = crate::parse(&format!(" {text}\n"), Profile::PASMONEXT_0_1_3).expect("parses");
+        let refused = !parse.diagnostics().is_empty() || bytes(text).is_err();
+        assert!(refused, "{text}");
+    }
+    // getbank_undefined, and an assembler that keeps no banks.
+    assert_eq!(
+        bytes("db ?? nope").err().map(|d| d.message().to_owned()),
+        Some("Symbol 'nope' is undefined".to_owned())
+    );
+    assert!(one("db ?? aa", &Names::default()).is_err());
+}
+
+#[test]
+fn setbank_and_savebin_are_reported_for_the_assembler() {
+    let definition = |text: &str| one(text, &Names::default()).map(|l| l.definition);
+    assert_eq!(
+        definition("SETBANK 0C000h,later"),
+        Ok(Some(Definition::Bank {
+            address: Ir::Num(0xC000),
+            bank: Ir::Sym("later".into()),
+        }))
+    );
+    assert_eq!(
+        definition("SAVEBIN \"out.bin\",8000h,size"),
+        Ok(Some(Definition::SaveBinary {
+            file: "out.bin".into(),
+            start: Ir::Num(0x8000),
+            size: Ir::Sym("size".into()),
+        }))
+    );
+    // setbank_paren, setbank_one_operand, savebin_unquoted, savebin_no_size,
+    // savebin_paren_size.
+    for (text, message) in [
+        ("SETBANK (0C000h),5", "Error SETBANK Params"),
+        ("SETBANK 0C000h", "Expected ',' but '(eol)' found"),
+        ("SAVEBIN out.bin,0,1", "Missing filename"),
+        ("SAVEBIN \"out.bin\",0", "Expected ',' but '(eol)' found"),
+    ] {
+        assert_eq!(
+            rejected(text, &Names::default()).message(),
+            message,
+            "{text}"
+        );
+    }
+    rejected("SAVEBIN \"out.bin\",0,(2)", &Names::default());
+    // A label is defined where the line stands.
+    let lowered = lower_all("here SETBANK 0C000h,5\n", &Names::default())
+        .remove(0)
+        .expect("lowers");
+    assert_eq!(lowered.items[0].label.as_deref(), Some("here"));
 }

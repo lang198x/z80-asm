@@ -1,7 +1,7 @@
 # Plan: the Z80 family parser with a PasmoNext profile
 
 **Status:** Agreed 2026-10-23. Steps 1 to 4 are done; step 5's design is
-agreed, and 5c steps 1 to 4 are built.
+agreed, and 5c steps 1 to 5 are built.
 **Binding records:** Lang198x's
 [shared syntax layer decision](https://github.com/lang198x/lang198x/blob/main/decisions/shared-syntax-layer.md)
 and 198x's
@@ -565,6 +565,21 @@ Design agreed 2026-10-23.
     drops everything after its first word, and calls an odd count a SAVEBIN
     failure.
   - **Measured:** 46 programs, in Asm198x's fixture, and what each printed.
+
+- **As built, 5c step 5, the Next's banks:** `?? name`, `SETBANK` and
+  `SAVEBIN`, none in the manual, so all measured (47 programs, in Asm198x's
+  fixture, and the files `SAVEBIN` wrote).
+  - **`??` is read only at the top of an expression,** as PasmoNext's
+    `parseexpr` reads it beside `HIGH` and `LOW`: a whole operand, or the
+    whole of what parentheses hold. Lowering folds it to the bank the new
+    `Known::bank` gives, so the back end never sees it. `??aa`, with no
+    space, is a name: `?` may start one.
+  - **`SETBANK` and `SAVEBIN` are `Definition`s,** since their effects are
+    the assembler's: the bank a slot holds, which each name records when it
+    is defined, and a file of memory as it stands on the last pass.
+  - **Fixed rather than copied:** PasmoNext skips a `SAVEBIN` whose address
+    does not start with a number or a name, saves nothing when its size does
+    not, and drops what follows the size; each is refused.
 
 ### 6. The gate, in Asm198x
 

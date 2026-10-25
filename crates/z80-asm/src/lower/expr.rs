@@ -39,6 +39,15 @@ pub trait Known {
 
     /// The address of the line being lowered, if it is known.
     fn pc(&self) -> Option<i64>;
+
+    /// The memory bank PasmoNext gives `name` for `?? name`, or `None` if
+    /// that is an error: the bank its value was in, by `SETBANK`, when it was
+    /// defined. Under PasmoNext a name not yet defined reads as bank 0 in the
+    /// first pass. An assembler with no banks keeps the default, `None`.
+    fn bank(&self, name: &str) -> Option<i64> {
+        let _ = name;
+        None
+    }
 }
 
 /// Why an expression could not be lowered, and where.
@@ -70,7 +79,7 @@ impl Problem {
 /// Lowers `expr` to an IR expression whose value, kept to 16 bits, is the
 /// one PasmoNext gives it.
 pub(crate) fn lower(expr: &ast::Expr, profile: &Profile, known: &dyn Known) -> Result<Ir, Problem> {
-    Lowering { profile, known }.expr(expr)
+    Lowering { profile, known }.top(expr)
 }
 
 struct Lowering<'a> {
@@ -79,6 +88,39 @@ struct Lowering<'a> {
 }
 
 impl Lowering<'_> {
+    /// A whole expression, PasmoNext's `parseexpr`. `?? name` is read only
+    /// here, beside `HIGH` and `LOW` at the top of its grammar, so it is a
+    /// whole operand, or the whole of what parentheses hold, but never part
+    /// of a larger expression.
+    fn top(&self, expr: &ast::Expr) -> Result<Ir, Problem> {
+        match expr {
+            ast::Expr::GetBank(bank) => self.bank(bank),
+            _ => self.expr(expr),
+        }
+    }
+
+    /// `parsebankvalue`: the bank of the name after `??`, from the
+    /// assembler.
+    fn bank(&self, bank: &ast::GetBankExpr) -> Result<Ir, Problem> {
+        let expected =
+            |found: &str| Problem::at(bank, format!("Bank Value expected but '{found}'found"));
+        let Some(token) = bank.name().and_then(|name| name.token()) else {
+            let found = super::instruction::meaningful_tokens(bank.syntax())
+                .get(1)
+                .map_or_else(|| "(eol)".to_owned(), |t| t.text().to_owned());
+            return Err(expected(&found));
+        };
+        let grammar = &self.profile.grammar;
+        if grammar.is_reserved(token.text()) || grammar.is_keyword(token.text()) {
+            return Err(expected(token.text()));
+        }
+        let name = grammar.name(token.text());
+        self.known
+            .bank(&name)
+            .map(|bank| Ir::Num(bank & 0xFFFF))
+            .ok_or_else(|| Problem::at(bank, format!("Symbol '{name}' is undefined")))
+    }
+
     fn expr(&self, expr: &ast::Expr) -> Result<Ir, Problem> {
         let missing = || Problem::at(expr, "this expression is incomplete");
         match expr {
@@ -91,7 +133,9 @@ impl Lowering<'_> {
                 }
                 Ok(Ir::Sym(self.profile.grammar.name(text)))
             }
-            ast::Expr::Paren(paren) => self.expr(&paren.expr().ok_or_else(missing)?),
+            // `parseparen` reads a whole expression again, so `(?? x)+1` is
+            // allowed where `?? x+1` is not.
+            ast::Expr::Paren(paren) => self.top(&paren.expr().ok_or_else(missing)?),
             ast::Expr::Unary(unary) => {
                 let operand = self.expr(&unary.operand().ok_or_else(missing)?)?;
                 let op = upper(unary.op()).ok_or_else(missing)?;
@@ -155,7 +199,12 @@ impl Lowering<'_> {
                 ))
             }
             ast::Expr::Nul(nul) => Ok(Ir::Num(if nul.has_rest() { 0 } else { TRUE })),
-            ast::Expr::GetBank(bank) => Err(Problem::at(bank, "`??` is not lowered yet")),
+            // Inside a larger expression: PasmoNext reads `??` only at the
+            // top (`getbank_negated`, `getbank_in_expression`).
+            ast::Expr::GetBank(bank) => Err(Problem::at(
+                bank,
+                "`??` takes a whole operand: PasmoNext reads it only before a name, alone",
+            )),
         }
     }
 

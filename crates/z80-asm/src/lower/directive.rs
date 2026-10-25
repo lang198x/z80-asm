@@ -141,6 +141,30 @@ pub(super) fn lower(
             ..label_only()
         },
         "HEX" => item(Some(Operation::Bytes(lowering.hex()?))),
+        // `parseBANK`: each value must start with a number or a name.
+        "SETBANK" => {
+            let [address, bank] = lowering.led_by_number_or_name("Error SETBANK Params")?;
+            Lowered {
+                definition: Some(Definition::Bank { address, bank }),
+                ..label_only()
+            }
+        }
+        // `parseSAVEBIN`. PasmoNext skips the line without a word when the
+        // address does not start with a number or a name, and saves nothing
+        // when the size does not; under 198x's decision on reference bugs,
+        // both are refused, as is anything after the size, which PasmoNext
+        // drops.
+        "SAVEBIN" => {
+            let file = lowering.quoted_file()?;
+            let [start, size] = lowering.led_by_number_or_name(
+                "`SAVEBIN` takes an address and a size that start with a number or a name; \
+                 PasmoNext 0.1.3 skips the line or saves nothing otherwise",
+            )?;
+            Lowered {
+                definition: Some(Definition::SaveBinary { file, start, size }),
+                ..label_only()
+            }
+        }
         // `parseSTACK`: a value PasmoNext needs as it reads the line.
         "STACK" => {
             lowering.some()?;
@@ -463,6 +487,36 @@ impl Lowering<'_> {
                 Ir::Num(i64::from(byte))
             })
             .collect())
+    }
+
+    /// Exactly `N` operands, each of which PasmoNext requires to start with
+    /// a number or a name, lowered for the assembler to evaluate.
+    fn led_by_number_or_name<const N: usize>(&self, refused: &str) -> Result<[Ir; N], Problem> {
+        for operand in &self.operands {
+            let first = meaningful_tokens(operand.syntax()).into_iter().next();
+            if !first.is_some_and(|t| matches!(t.kind(), kinds::NUMBER | kinds::IDENT)) {
+                return Err(self.problem(refused));
+            }
+        }
+        if self.operands.len() < N {
+            return Err(self.problem("Expected ',' but '(eol)' found"));
+        }
+        self.only(N)?;
+        let values = (0..N)
+            .map(|index| self.value(index))
+            .collect::<Result<Vec<_>, _>>()?;
+        values
+            .try_into()
+            .map_err(|_| self.problem("Value expected"))
+    }
+
+    /// The quoted file a directive such as `SAVEBIN` names.
+    fn quoted_file(&self) -> Result<String, Problem> {
+        self.directive
+            .file_name()
+            .and_then(|name| name.string())
+            .map(|string| unquote(string.text()))
+            .ok_or_else(|| self.problem("Missing filename"))
     }
 
     /// The one operand, if it is a number written alone.
