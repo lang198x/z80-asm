@@ -89,7 +89,7 @@ impl Lowering<'_> {
                 if self.profile.grammar.is_reserved(text) || self.profile.grammar.is_keyword(text) {
                     return Err(Problem::at(name, format!("`{text}` is not a value")));
                 }
-                Ok(Ir::Sym(text.to_owned()))
+                Ok(Ir::Sym(self.profile.grammar.name(text)))
             }
             ast::Expr::Paren(paren) => self.expr(&paren.expr().ok_or_else(missing)?),
             ast::Expr::Unary(unary) => {
@@ -146,11 +146,13 @@ impl Lowering<'_> {
             }
             ast::Expr::Defined(defined) => {
                 let name = defined.name().and_then(|n| n.token()).ok_or_else(missing)?;
-                Ok(Ir::Num(if self.known.defined(name.text()) {
-                    TRUE
-                } else {
-                    0
-                }))
+                Ok(Ir::Num(
+                    if self.known.defined(&self.profile.grammar.name(name.text())) {
+                        TRUE
+                    } else {
+                        0
+                    },
+                ))
             }
             ast::Expr::Nul(nul) => Ok(Ir::Num(if nul.has_rest() { 0 } else { TRUE })),
             ast::Expr::GetBank(bank) => Err(Problem::at(bank, "`??` is not lowered yet")),

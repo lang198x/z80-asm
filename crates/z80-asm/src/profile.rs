@@ -107,6 +107,12 @@ pub(crate) struct Grammar {
     /// The word that asks which memory bank a name is in, such as `??`. It
     /// takes one name and is a whole expression on its own.
     pub(crate) getbank: Option<&'static str>,
+    /// A character a name may contain that is not part of it, if the
+    /// dialect has one, so `a$b` and `ab` are one name.
+    pub(crate) name_ignores: Option<char>,
+    /// Whether names match whatever their case, as with PasmoNext's
+    /// `--nocase`. A name then means its upper-case spelling.
+    pub(crate) names_ignore_case: bool,
 }
 
 /// A directive and the shape of its operands.
@@ -436,6 +442,18 @@ impl Grammar {
         self.is_mnemonic(word) || self.directive(word).is_some()
     }
 
+    /// The name `text` means: without the characters names ignore, and in
+    /// upper case if names ignore case. Where a name is written, its text
+    /// is kept as written; this is what it is matched and defined as.
+    pub(crate) fn name(&self, text: &str) -> String {
+        let kept = text.chars().filter(|c| Some(*c) != self.name_ignores);
+        if self.names_ignore_case {
+            kept.map(|c| c.to_ascii_uppercase()).collect()
+        } else {
+            kept.collect()
+        }
+    }
+
     /// Whether `word` is reserved without starting a statement: a register,
     /// a condition, a word operator or another word the dialect keeps.
     pub(crate) fn is_reserved(&self, word: &str) -> bool {
@@ -522,6 +540,11 @@ impl Profile {
             conditions: &["nz", "z", "nc", "c", "po", "pe", "p", "m"],
             current_address_words: &["PC"],
             getbank: Some("??"),
+            // The manual: "The '$' are ignored". PasmoNext 0.1.3's
+            // `stripdollar` removes the wrong characters, so it reads
+            // `ab$c` as `ac`; that bug is not copied.
+            name_ignores: Some('$'),
+            names_ignore_case: false,
         },
     };
 
@@ -541,6 +564,47 @@ impl Profile {
     #[must_use]
     pub const fn version(self) -> &'static str {
         self.version
+    }
+
+    /// The same profile, with names that match whatever their case, as
+    /// PasmoNext's `--nocase` option makes them. A name then means its
+    /// upper-case spelling: `Start` and `START` are one label, and a symbol
+    /// list shows `START`.
+    ///
+    /// ```
+    /// use lang198x_z80_asm::Profile;
+    ///
+    /// let profile = Profile::PASMONEXT_0_1_3.with_names_in_any_case();
+    /// assert!(profile.names_in_any_case());
+    /// assert!(!Profile::PASMONEXT_0_1_3.names_in_any_case());
+    /// ```
+    #[must_use]
+    pub const fn with_names_in_any_case(mut self) -> Self {
+        self.grammar.names_ignore_case = true;
+        self
+    }
+
+    /// Whether names match whatever their case.
+    #[must_use]
+    pub const fn names_in_any_case(self) -> bool {
+        self.grammar.names_ignore_case
+    }
+
+    /// The name `text` means when written as a name: without the characters
+    /// names ignore, and in upper case if names match in any case. Lowering
+    /// gives every name this way; an assembler that reads a name from the
+    /// tree itself, such as a line's label, can use it to agree.
+    ///
+    /// ```
+    /// use lang198x_z80_asm::Profile;
+    ///
+    /// let profile = Profile::PASMONEXT_0_1_3;
+    /// assert_eq!(profile.name("ab$c"), "abc");
+    /// assert_eq!(profile.with_names_in_any_case().name("Start"), "START");
+    /// ```
+    #[must_use]
+    pub fn name(self, text: &str) -> String {
+        self.grammar.name(text)
     }
 }
 

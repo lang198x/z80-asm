@@ -191,7 +191,7 @@ impl Lowering<'_> {
                         if !self.profile.grammar.is_reserved(token.text())
                             && !self.profile.grammar.is_keyword(token.text()) =>
                     {
-                        Ok(token.text().to_owned())
+                        Ok(self.profile.grammar.name(token.text()))
                     }
                     (_, [first, ..]) => Err(expected(first.text())),
                     (_, []) => Err(expected("")),

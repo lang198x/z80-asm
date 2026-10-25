@@ -103,6 +103,12 @@ pub trait Host {
 
     /// The block last entered has finished.
     fn leave(&mut self) {}
+
+    /// A macro named `name` is being defined. PasmoNext ends its automatic
+    /// local scope here, under `--alocal`.
+    fn macro_defined(&mut self, name: &str) {
+        let _ = name;
+    }
 }
 
 /// A line for the host to assemble.
@@ -693,6 +699,7 @@ impl Expander {
     /// the innermost macro's arguments and `##`, then the `IRP`s inside it,
     /// outermost first. Returns whether anything changed.
     fn substitute(&mut self, pieces: &mut Vec<Piece>) -> bool {
+        let grammar = self.profile.grammar;
         let chain_start = self
             .frames
             .iter()
@@ -702,7 +709,7 @@ impl Expander {
         for i in chain_start..self.frames.len() {
             match &self.frames[i].kind {
                 Kind::Macro { def, args, .. } => {
-                    changed |= substitute::substitute(pieces, &def.params, args);
+                    changed |= substitute::substitute(pieces, &def.params, args, &grammar);
                     match substitute::paste(pieces) {
                         Ok(pasted) => changed |= pasted,
                         Err(bad) => {
@@ -717,8 +724,12 @@ impl Expander {
                     ..
                 } => {
                     let value = values.get(*index).cloned().unwrap_or_default();
-                    changed |=
-                        substitute::substitute(pieces, std::slice::from_ref(param), &[value]);
+                    changed |= substitute::substitute(
+                        pieces,
+                        std::slice::from_ref(param),
+                        &[value],
+                        &grammar,
+                    );
                 }
                 Kind::Repeat { .. } => {}
             }
@@ -748,7 +759,7 @@ impl Expander {
         let next = if colon { 2 } else { 1 };
         let after = head::word(current.tokens.get(next), &grammar);
         if after == Word::Block(Role::Macro) {
-            self.define(name.to_owned(), &current, next + 1, false);
+            self.define(name.to_owned(), &current, next + 1, false, host);
             return;
         }
         if !colon && self.macros.contains_key(name) {
@@ -808,7 +819,7 @@ impl Expander {
             Role::Macro => {
                 let name = current.tokens.get(at + 1);
                 match name.map(|t| head::word(Some(t), &self.profile.grammar)) {
-                    Some(Word::Name(name)) => self.define(name, current, at + 2, true),
+                    Some(Word::Name(name)) => self.define(name, current, at + 2, true, host),
                     _ => self.report_current(current, "expected a macro name after `MACRO`"),
                 }
             }
@@ -904,7 +915,15 @@ impl Expander {
     /// Defines a macro named `name`, whose parameters start at token
     /// `params`. `comma` is set for `MACRO name, params`, which needs a comma
     /// after the name. The body runs to the matching ENDM.
-    fn define(&mut self, name: String, current: &Current, params: usize, comma: bool) {
+    fn define(
+        &mut self,
+        name: String,
+        current: &Current,
+        params: usize,
+        comma: bool,
+        host: &mut dyn Host,
+    ) {
+        host.macro_defined(&name);
         let grammar = self.profile.grammar;
         let mut list = Vec::new();
         let mut i = params;
@@ -1005,7 +1024,8 @@ impl Expander {
                     Expr::Name(name) => name
                         .token()
                         .map(|t| t.text().to_owned())
-                        .filter(|text| !grammar.is_reserved(text) && !grammar.is_keyword(text)),
+                        .filter(|text| !grammar.is_reserved(text) && !grammar.is_keyword(text))
+                        .map(|text| grammar.name(&text)),
                     _ => None,
                 });
                 let Some(name) = name else {
@@ -1102,7 +1122,7 @@ impl Expander {
             .line
             .label()
             .and_then(|label| label.name())
-            .is_some_and(|token| token.text() == name);
+            .is_some_and(|token| self.profile.grammar.name(token.text()) == name);
         if agrees {
             self.hand_over(current, false);
             return;

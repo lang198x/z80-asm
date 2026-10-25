@@ -9,6 +9,7 @@
 //! The rules follow PasmoNext's `getmacroparams`, `substmacroparams` and
 //! `MacroFrameMacro::substparams` (`asm.cpp`).
 
+use crate::profile::Grammar;
 use lang198x_syntax::{Span, SyntaxKind, TextId, TextRange, TextSize};
 
 use crate::ast::{Line, View};
@@ -88,14 +89,23 @@ pub(super) fn args(pieces: &[Piece]) -> Vec<Arg> {
 }
 
 /// Replaces each name in `pieces` that is one of `params` with the matching
-/// argument, or with nothing if there are fewer arguments. Names match
-/// exactly, case included. Returns whether anything changed.
-pub(super) fn substitute(pieces: &mut Vec<Piece>, params: &[String], args: &[Arg]) -> bool {
+/// argument, or with nothing if there are fewer arguments. Names match as
+/// `grammar` reads them: exactly, case included, unless names ignore case.
+/// Returns whether anything changed.
+pub(super) fn substitute(
+    pieces: &mut Vec<Piece>,
+    params: &[String],
+    args: &[Arg],
+    grammar: &Grammar,
+) -> bool {
     let mut changed = false;
     let mut out = Vec::with_capacity(pieces.len());
     for piece in pieces.drain(..) {
         let param = (piece.kind == kinds::IDENT)
-            .then(|| params.iter().position(|p| *p == piece.text))
+            .then(|| {
+                let name = grammar.name(&piece.text);
+                params.iter().position(|p| *p == name)
+            })
             .flatten();
         match param {
             Some(n) => {

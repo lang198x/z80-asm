@@ -1114,3 +1114,39 @@ fn a_line_limit_stops_a_repeat_that_runs_too_long() {
         ["more than 50 lines run; does a repeat never end?"]
     );
 }
+
+/// Records the macros defined, in order.
+#[derive(Default)]
+struct Definitions(Vec<String>);
+
+impl Host for Definitions {
+    fn evaluate(&mut self, _: &Expr) -> Result<i64, String> {
+        Ok(1)
+    }
+
+    fn set_counter(&mut self, _: &str, _: i64) {}
+
+    fn macro_defined(&mut self, name: &str) {
+        self.0.push(name.to_owned());
+    }
+}
+
+#[test]
+fn the_host_hears_each_macro_as_it_is_defined() {
+    // Both spellings of a definition, and a call, which defines nothing.
+    // Under `--nocase` the name is the one the profile reads.
+    let text = "first macro\n endm\n macro Second\n endm\n first\n";
+    for (profile, expected) in [
+        (Profile::PASMONEXT_0_1_3, ["first", "Second"]),
+        (
+            Profile::PASMONEXT_0_1_3.with_names_in_any_case(),
+            ["FIRST", "SECOND"],
+        ),
+    ] {
+        let program = Program::load("t.asm", text, profile, |_| None).expect("loads");
+        let mut expander = Expander::new(program, profile).expect("parses");
+        let mut host = Definitions::default();
+        while expander.next_line(&mut host).is_some() {}
+        assert_eq!(host.0, expected);
+    }
+}

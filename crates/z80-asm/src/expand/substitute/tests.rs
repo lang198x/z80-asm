@@ -44,9 +44,15 @@ fn arguments_split_at_commas_as_pasmonext_reads_them() {
 
 #[test]
 fn whole_names_are_substituted_and_missing_arguments_vanish() {
+    let grammar = Profile::PASMONEXT_0_1_3.grammar;
     let mut pieces = line_pieces(" db v, xv, \"v\", w ; v");
     let arg: Arg = line_pieces("1+1");
-    let changed = substitute(&mut pieces, &["v".to_owned(), "w".to_owned()], &[arg]);
+    let changed = substitute(
+        &mut pieces,
+        &["v".to_owned(), "w".to_owned()],
+        &[arg],
+        &grammar,
+    );
     assert!(changed);
     assert_eq!(joined(&pieces), " db 1+1, xv, \"v\",  ; v");
     // Case matters.
@@ -54,7 +60,32 @@ fn whole_names_are_substituted_and_missing_arguments_vanish() {
     assert!(!substitute(
         &mut pieces,
         &["v".to_owned()],
-        &[line_pieces("1")]
+        &[line_pieces("1")],
+        &grammar
+    ));
+}
+
+#[test]
+fn names_match_as_the_grammar_reads_them() {
+    // nocase_macro_param: with `--nocase`, `val` and `VAL` are the
+    // parameter `Val`, which the expander holds as `VAL`.
+    let any_case = Profile::PASMONEXT_0_1_3.with_names_in_any_case().grammar;
+    let mut pieces = line_pieces(" db val, VAL");
+    assert!(substitute(
+        &mut pieces,
+        &["VAL".to_owned()],
+        &[line_pieces("7")],
+        &any_case
+    ));
+    assert_eq!(joined(&pieces), " db 7, 7");
+    // `$` is not part of a name: `v$` is the parameter `v`.
+    let mut pieces = line_pieces(" db v$");
+    let grammar = Profile::PASMONEXT_0_1_3.grammar;
+    assert!(substitute(
+        &mut pieces,
+        &["v".to_owned()],
+        &[line_pieces("1")],
+        &grammar
     ));
 }
 
