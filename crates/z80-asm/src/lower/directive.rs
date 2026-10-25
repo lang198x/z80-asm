@@ -6,23 +6,24 @@
 
 use asm198x_ir::{Expr as Ir, Operation};
 
-use super::Item;
 use super::expr::{self, Known, Problem};
 use super::instruction::{low_byte, meaningful_tokens};
+use super::{Item, Scope};
 use crate::ast::{self, Operand, View};
 use crate::expand::unquote;
 use crate::kinds;
 use crate::lexer::{number_value, string_bytes};
 use crate::profile::Profile;
 
-/// Lowers `directive`, with the line's `label`, to the statements it makes.
+/// Lowers `directive`, with the line's `label`, to the statements it makes
+/// and the change it makes to the scopes, if any.
 pub(super) fn lower(
     directive: &ast::Directive,
     label: Option<String>,
     profile: &Profile,
     known: &dyn Known,
     binaries: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
-) -> Result<Vec<Item>, Problem> {
+) -> Result<(Vec<Item>, Option<Scope>), Problem> {
     let keyword = directive
         .keyword()
         .map(|t| t.text().to_ascii_uppercase())
@@ -34,12 +35,43 @@ pub(super) fn lower(
         operands: directive.operands().collect(),
     };
     let item = |op| {
-        vec![Item {
-            label: label.clone(),
-            op,
-        }]
+        (
+            vec![Item {
+                label: label.clone(),
+                op,
+            }],
+            None,
+        )
+    };
+    let scope = |scope| {
+        let items = label
+            .iter()
+            .map(|name| Item {
+                label: Some(name.clone()),
+                op: None,
+            })
+            .collect();
+        (items, Some(scope))
     };
     Ok(match keyword.as_str() {
+        // `parseLOCAL`, `parsePROC` and `parseENDP`. A label on the line is
+        // defined first, where the line stands, so `here LOCAL here` defines
+        // the outer `here`.
+        "LOCAL" => scope(Scope::Local(lowering.names()?)),
+        "PROC" => {
+            lowering.only(0)?;
+            scope(Scope::Proc)
+        }
+        "ENDP" => {
+            lowering.only(0)?;
+            scope(Scope::Endp)
+        }
+        // `parsePUBLIC` is reached only from the start of a line: after a
+        // label, PasmoNext reads the word as an instruction.
+        "PUBLIC" if label.is_some() => {
+            return Err(lowering.problem("Unexpected 'PUBLIC' used as instruction"));
+        }
+        "PUBLIC" => scope(Scope::Public(lowering.names()?)),
         // `parseORG`: the label takes the new address, and the rest of the
         // line is never read.
         "ORG" => {
@@ -51,7 +83,7 @@ pub(super) fn lower(
             if label.is_some() {
                 items.push(Item { label, op: None });
             }
-            items
+            (items, None)
         }
         "EQU" | "DEFL" => {
             if label.is_none() {
@@ -137,6 +169,35 @@ impl Lowering<'_> {
                      be defined above",
                 )
             })
+    }
+
+    /// `LOCAL`'s and `PUBLIC`'s names: one or more, separated by commas,
+    /// each a name that is not a register or a keyword.
+    fn names(&self) -> Result<Vec<String>, Problem> {
+        // PasmoNext 0.1.3 prints only "Expected '" here: its name for an
+        // identifier token is empty, and the message stops there. This is
+        // the message it means to give.
+        let expected =
+            |found: &str| self.problem(format!("Expected identifier but '{found}' found"));
+        if self.operands.is_empty() {
+            return Err(expected(""));
+        }
+        self.operands
+            .iter()
+            .map(|operand| {
+                let tokens = meaningful_tokens(operand.syntax());
+                match (operand.expr(), tokens.as_slice()) {
+                    (Some(ast::Expr::Name(_)), [token])
+                        if !self.profile.grammar.is_reserved(token.text())
+                            && !self.profile.grammar.is_keyword(token.text()) =>
+                    {
+                        Ok(token.text().to_owned())
+                    }
+                    (_, [first, ..]) => Err(expected(first.text())),
+                    (_, []) => Err(expected("")),
+                }
+            })
+            .collect()
     }
 
     /// Fails unless there is at least one operand.

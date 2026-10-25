@@ -1,6 +1,7 @@
 # Plan: the Z80 family parser with a PasmoNext profile
 
-**Status:** Agreed 2026-10-23. Steps 1 to 4 are done; step 5's design is agreed.
+**Status:** Agreed 2026-10-23. Steps 1 to 4 are done; step 5's design is
+agreed, and 5c steps 1 and 2 (its directives) are built.
 **Binding records:** Lang198x's
 [shared syntax layer decision](https://github.com/lang198x/lang198x/blob/main/decisions/shared-syntax-layer.md)
 and 198x's
@@ -477,6 +478,26 @@ Design agreed 2026-10-23.
     redundant checks were removed and the test helper stopped truncating.
   - **Found on the way, fixed first:** a register such as `i` was accepted as
     a `REPT` counter's name (z80-asm#22).
+
+- **As built, 5c step 2, the directives:** `LOCAL`, `PROC`, `ENDP` and
+  `PUBLIC` lower to a `lower::Scope` on the line, after its statements. Names in
+  statements stay as written: the scopes are Asm198x's walk's to keep,
+  because PasmoNext ties them to its symbols and passes (`LocalLevel` in its
+  `asm.cpp`). The options in this step, `--alocal`, `--nocase` and
+  `--equ`, come next.
+  - **What PasmoNext does, measured (56 programs, recorded in Asm198x's
+    `pasmonext-0.1.3-programs.txt`):** a `LOCAL` name is renamed for the
+    rest of its scope to a counter in eight hex digits, which starts again
+    each pass; every macro call, `REPT` and `IRP` is a scope, as is
+    `PROC`…`ENDP`. A `REPT` or `IRP` is one scope for all its passes, so a
+    local label in one is defined twice. A `PROC` left open in a macro
+    closes with it, and an `ENDP` there cannot close one outside. `LOCAL`
+    outside any scope, an unmatched `ENDP` and an unclosed `PROC` are
+    errors. A label on a `LOCAL`, `PROC` or `ENDP` line is defined first;
+    after a label, `PUBLIC` is read as an instruction and rejected.
+  - **One message differs:** for a `LOCAL` or `PUBLIC` operand that is not
+    a name, PasmoNext prints only "Expected '", because its name for an
+    identifier token is empty. Lowering gives the message it means.
 
 ### 6. The gate, in Asm198x
 

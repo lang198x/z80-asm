@@ -33,6 +33,31 @@ pub struct Lowered {
     pub items: Vec<Item>,
     /// The quirks lowering applied, for a tool that ports the source.
     pub quirks: Vec<Quirk>,
+    /// The change the line makes to the scopes names live in, made after
+    /// its statements.
+    pub scope: Option<Scope>,
+}
+
+/// A change to the scopes names live in, from `LOCAL`, `PROC`, `ENDP` or
+/// `PUBLIC`.
+///
+/// Lowering only reports these: the names in a line's statements are left as
+/// written. The assembler keeps the scopes, because PasmoNext ties them to
+/// its symbols and passes. Every macro call, `REPT` and `IRP` is a scope too;
+/// the expander reports those through its host.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Scope {
+    /// `LOCAL`: from the next line, these names are local to the innermost
+    /// scope. Naming one twice in a scope changes nothing.
+    Local(Vec<String>),
+    /// `PROC`: a new scope starts.
+    Proc,
+    /// `ENDP`: the scope `PROC` started ends. It must be the innermost.
+    Endp,
+    /// `PUBLIC`: these names are listed in the public symbol file. It does
+    /// not change what they mean.
+    Public(Vec<String>),
 }
 
 impl Lowered {
@@ -93,6 +118,7 @@ pub fn line(
             })
             .collect(),
         quirks: Vec::new(),
+        scope: None,
     };
     if line.label_only() {
         return Ok(only_label());
@@ -106,12 +132,16 @@ pub fn line(
                     op: Some(lowered.op),
                 }],
                 quirks: lowered.quirks,
+                scope: None,
             })
         }
         Some(Statement::Directive(d)) => {
-            directive::lower(&d, label.clone(), profile, known, binaries).map(|items| Lowered {
-                items,
-                quirks: Vec::new(),
+            directive::lower(&d, label.clone(), profile, known, binaries).map(|(items, scope)| {
+                Lowered {
+                    items,
+                    quirks: Vec::new(),
+                    scope,
+                }
             })
         }
         Some(Statement::MacroCall(call)) => Err(Problem::at(

@@ -257,9 +257,9 @@ fn end_gives_the_entry_point_it_names() {
 
 #[test]
 fn directives_not_lowered_yet_say_so_and_fmessage_is_rejected() {
-    let proc = rejected("proc", &Names::default());
-    assert_eq!(proc.kind(), DiagnosticKind::Unsupported);
-    assert_eq!(proc.message(), "`PROC` is not lowered yet");
+    let structure = rejected("struct", &Names::default());
+    assert_eq!(structure.kind(), DiagnosticKind::Unsupported);
+    assert_eq!(structure.message(), "`STRUCT` is not lowered yet");
     let fmessage = rejected("fmessage", &Names::default());
     assert_eq!(fmessage.kind(), DiagnosticKind::Invalid);
 }
@@ -356,4 +356,100 @@ fn an_expression_the_expander_asks_about_lowers_on_its_own() {
     // A register is not a value.
     let register = operand(" if a\n");
     assert!(expression(&register, &Profile::PASMONEXT_0_1_3, &Names::default()).is_err());
+}
+
+/// The scope change `text` lowers to.
+fn scope(text: &str) -> Option<Scope> {
+    one(text, &Names::default())
+        .unwrap_or_else(|d| panic!("{text}: {}", d.message()))
+        .scope
+}
+
+#[test]
+fn scope_directives_are_reported_for_the_assembler_to_keep() {
+    // local_list, proc_local_shadows_global, lowercase_scope_words.
+    assert_eq!(
+        scope("LOCAL aa, bb"),
+        Some(Scope::Local(vec!["aa".into(), "bb".into()]))
+    );
+    // local_same_name_twice_on_a_line is accepted; naming it twice is the
+    // assembler's to ignore.
+    assert_eq!(
+        scope("local aa,aa"),
+        Some(Scope::Local(vec!["aa".into(), "aa".into()]))
+    );
+    assert_eq!(scope("PROC"), Some(Scope::Proc));
+    assert_eq!(scope("endp"), Some(Scope::Endp));
+    // public_list, public_undefined.
+    assert_eq!(
+        scope("PUBLIC qq, ss"),
+        Some(Scope::Public(vec!["qq".into(), "ss".into()]))
+    );
+    assert_eq!(scope("nop"), None);
+    assert_eq!(scope("db 1"), None);
+}
+
+#[test]
+fn a_label_on_a_scope_line_is_defined_where_the_line_stands() {
+    // label_on_proc_line, label_on_endp_line, label_on_local_line.
+    for (source, kind) in [
+        ("start PROC\n", Scope::Proc),
+        ("fin ENDP\n", Scope::Endp),
+        ("here LOCAL here\n", Scope::Local(vec!["here".into()])),
+    ] {
+        let lowered = lower_all(source, &Names::default())
+            .remove(0)
+            .expect("lowers");
+        assert_eq!(lowered.items.len(), 1, "{source}");
+        assert!(lowered.items[0].label.is_some(), "{source}");
+        assert!(lowered.items[0].op.is_none(), "{source}");
+        assert_eq!(lowered.scope, Some(kind), "{source}");
+    }
+    // label_on_public_line: after a label, PUBLIC is read as an instruction.
+    let diagnostics = lower_all("here PUBLIC here\n", &Names::default());
+    let Err(diagnostic) = &diagnostics[0] else {
+        panic!("accepted");
+    };
+    assert_eq!(
+        diagnostic.message(),
+        "Unexpected 'PUBLIC' used as instruction"
+    );
+}
+
+#[test]
+fn scope_directives_take_only_names() {
+    // local_without_names, local_number, local_register, public_number,
+    // public_without_names, proc_with_operand, endp_with_operand.
+    for text in [
+        "LOCAL",
+        "LOCAL 5",
+        "LOCAL hl",
+        "LOCAL aa+1",
+        "LOCAL nop",
+        "PUBLIC 5",
+        "PUBLIC",
+        "PROC 5",
+        "ENDP 5",
+    ] {
+        rejected(text, &Names::default());
+    }
+    assert_eq!(
+        rejected("LOCAL 5", &Names::default()).message(),
+        "Expected identifier but '5' found"
+    );
+    assert_eq!(
+        rejected("PROC 5", &Names::default()).message(),
+        "End line expected"
+    );
+}
+
+#[test]
+fn a_scope_line_with_more_after_its_names_does_not_parse() {
+    // local_trailing_comma, local_junk_after_name.
+    for source in [" LOCAL aa,\n", " LOCAL aa bb\n", " PUBLIC qq ss\n"] {
+        let parse = crate::parse(source, Profile::PASMONEXT_0_1_3).expect("parses");
+        let rejected =
+            !parse.diagnostics().is_empty() || lower_all(source, &Names::default())[0].is_err();
+        assert!(rejected, "{source} is accepted");
+    }
 }
