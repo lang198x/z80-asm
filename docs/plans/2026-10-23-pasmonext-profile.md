@@ -600,6 +600,21 @@ Design agreed 2026-10-23.
     is no longer an operand, such as `push 0,(hl)`, is still the "ignores
     everything after" bug, since the value is read before anything after it.
 
+- **As built, the bug decision's follow-ups:**
+  - **Text after `ELSE`, `ENDIF` and `ENDM` is rejected.** PasmoNext rejects
+    it after an `ELSE` or `ENDIF` it runs, which the expander missed. Where it
+    reaches one while skipping lines, and after any `ENDM`, it reads nothing
+    more and drops the text. That is one of its bugs, so the expander rejects
+    it, saying so. Eight programs measured on PasmoNext show it.
+  - **"looks like a non existent instruction"** is
+    `Quirk::LooksLikeAnAddress`, whose warning lowering gives where
+    PasmoNext's `dobyteinmediate` does: a byte value for `LD` into a
+    register or `(hl)`, or for the arithmetic and logic group, that starts
+    with `(` on a line that ends with `)`. PasmoNext's manual documents this
+    reading, so the warning is kept. Measured on every accepted line of the
+    sweep (the 40 it warned about are in `pasmonext-0.1.3-looks.tsv`) and 20
+    more.
+
 ### 6. The gate, in Asm198x
 
 Pull requests to `asm198x/asm198x`, after publishing `lang198x-z80-asm`.

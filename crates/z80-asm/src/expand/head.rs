@@ -86,8 +86,13 @@ pub(super) fn word(token: Option<&Tok>, grammar: &Grammar) -> Word {
 /// first, or the second if the first is an ordinary name. After `here:` that
 /// is the colon, so `here: else` is not an `ELSE`.
 pub(super) fn skip_word(tokens: &[Tok], grammar: &Grammar) -> Word {
+    word(tokens.get(skip_index(tokens, grammar)), grammar)
+}
+
+/// Where [`skip_word`] finds its word among `tokens`.
+pub(super) fn skip_index(tokens: &[Tok], grammar: &Grammar) -> usize {
     match word(tokens.first(), grammar) {
-        Word::Name(_) => word(tokens.get(1), grammar),
-        first => first,
+        Word::Name(_) => 1,
+        _ => 0,
     }
 }

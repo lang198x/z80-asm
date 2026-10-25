@@ -475,6 +475,7 @@ impl Expander {
                 Word::Block(Role::Endm) => {
                     level -= 1;
                     if level == 0 {
+                        self.check_bare(&tokens, "ENDM", true);
                         return true;
                     }
                 }
@@ -483,6 +484,33 @@ impl Expander {
             }
         }
         false
+    }
+
+    /// Reports text after the `keyword` that ends or steps a block, on the
+    /// line at the cursor, whose tokens are `tokens`. `ignored` says that
+    /// PasmoNext 0.1.3 reads nothing after the keyword here, so it would
+    /// have dropped the text: one of its bugs, under 198x's decision to fix
+    /// reference assemblers' bugs rather than copy them.
+    fn check_bare(&mut self, tokens: &[Tok], keyword: &str, ignored: bool) {
+        if let Some(message) = self.bare(tokens, keyword, ignored) {
+            self.report_here(message);
+        }
+    }
+
+    /// What [`check_bare`](Self::check_bare) reports, if anything.
+    fn bare(&self, tokens: &[Tok], keyword: &str, ignored: bool) -> Option<String> {
+        let at = head::skip_index(tokens, &self.profile.grammar);
+        if tokens.len() <= at + 1 {
+            return None;
+        }
+        Some(if ignored {
+            format!(
+                "expected the end of the line after `{keyword}`: PasmoNext 0.1.3 ignores the \
+                 rest of this line"
+            )
+        } else {
+            format!("expected the end of the line after `{keyword}`")
+        })
     }
 
     // Frames.
@@ -497,6 +525,9 @@ impl Expander {
         let tokens = self.raw_tokens(index);
         let first = head::word(tokens.first(), &self.profile.grammar);
         let in_macro = matches!(frame.kind, Kind::Macro { .. });
+        if first == Word::Block(Role::Endm) {
+            self.check_bare(&tokens, "ENDM", true);
+        }
         match first {
             Word::Block(Role::Endm) if in_macro => self.pop(host),
             Word::Block(Role::Exitm) if in_macro => self.pop(host),
@@ -826,8 +857,16 @@ impl Expander {
     fn run_block(&mut self, role: Role, current: &Current, at: usize, host: &mut dyn Host) {
         match role {
             Role::If => self.run_if(current, host),
-            Role::Else => self.run_else(current),
+            Role::Else => {
+                if let Some(message) = self.bare(&current.tokens, "ELSE", false) {
+                    self.report_current(current, &message);
+                }
+                self.run_else(current);
+            }
             Role::Endif => {
+                if let Some(message) = self.bare(&current.tokens, "ENDIF", false) {
+                    self.report_current(current, &message);
+                }
                 if self.if_level == 0 {
                     self.report_current(current, "ENDIF without IF");
                 } else {
@@ -906,7 +945,13 @@ impl Expander {
         while self.advance() {
             let index = self.cursor.unwrap_or(0);
             let tokens = self.raw_tokens(index);
-            match head::skip_word(&tokens, &grammar) {
+            let word = head::skip_word(&tokens, &grammar);
+            match word {
+                Word::Block(Role::Else) => self.check_bare(&tokens, "ELSE", true),
+                Word::Block(Role::Endif) => self.check_bare(&tokens, "ENDIF", true),
+                _ => {}
+            }
+            match word {
                 Word::Block(Role::If) => level += 1,
                 Word::Block(Role::Else) if stop_at_else && level == 1 => {
                     self.if_level += 1;
@@ -995,6 +1040,7 @@ impl Expander {
             if head::word(tokens.first(), &grammar) == Word::Block(Role::Endm) {
                 level -= 1;
                 if level == 0 {
+                    self.check_bare(&tokens, "ENDM", true);
                     return true;
                 }
             }
