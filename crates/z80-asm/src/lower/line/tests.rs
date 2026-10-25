@@ -257,9 +257,9 @@ fn end_gives_the_entry_point_it_names() {
 
 #[test]
 fn directives_not_lowered_yet_say_so_and_fmessage_is_rejected() {
-    let structure = rejected("struct", &Names::default());
-    assert_eq!(structure.kind(), DiagnosticKind::Unsupported);
-    assert_eq!(structure.message(), "`STRUCT` is not lowered yet");
+    let message = rejected("message 1", &Names::default());
+    assert_eq!(message.kind(), DiagnosticKind::Unsupported);
+    assert_eq!(message.message(), "`MESSAGE` is not lowered yet");
     let fmessage = rejected("fmessage", &Names::default());
     assert_eq!(fmessage.kind(), DiagnosticKind::Invalid);
 }
@@ -453,4 +453,162 @@ fn a_scope_line_with_more_after_its_names_does_not_parse() {
             !parse.diagnostics().is_empty() || lower_all(source, &Names::default())[0].is_err();
         assert!(rejected, "{source} is accepted");
     }
+}
+
+/// What each line of `source` defines, or its rejection.
+fn definitions(source: &str) -> Vec<Result<Option<Definition>, String>> {
+    lower_all(source, &Names::default())
+        .into_iter()
+        .map(|lowered| {
+            lowered
+                .map(|l| l.definition)
+                .map_err(|d| d.message().to_owned())
+        })
+        .collect()
+}
+
+fn field(name: &str, size: i64) -> Result<Option<Definition>, String> {
+    Ok(Some(Definition::Field {
+        name: name.to_owned(),
+        size,
+    }))
+}
+
+#[test]
+fn a_structures_fields_are_its_body_lines() {
+    // struct_ds_and_strings, struct_db_list, struct_dw_list,
+    // struct_db_string_one_char and struct_db_empty_string: a string counts
+    // its bytes, anything else in DB one, each DW item two, and DS its count.
+    // Blank and comment lines define nothing.
+    let source = " STRUCT rec\nname db \"abcd\"\n\n; note\npad ds 3,1\ntag defm 'x'\n\
+                  w defw 0,0\nls db 1,2,3\nes db \"\"\nv db xx ; note\n ENDS\n";
+    assert_eq!(
+        definitions(source),
+        [
+            Ok(Some(Definition::Struct("rec".into()))),
+            field("name", 4),
+            Ok(None),
+            Ok(None),
+            field("pad", 3),
+            field("tag", 1),
+            field("w", 4),
+            field("ls", 3),
+            field("es", 0),
+            field("v", 1),
+            Ok(Some(Definition::EndStruct)),
+        ]
+    );
+}
+
+#[test]
+fn a_structures_body_is_read_as_fields_not_run() {
+    // struct_if_inside, struct_rept_inside, struct_macro_call_inside,
+    // struct_instruction_inside, struct_field_colon, struct_field_without_name
+    // and struct_label_on_ends: PasmoNext refuses each, naming the token.
+    for (line, token) in [
+        (" IF 1", "IF"),
+        (" REPT 2", "REPT"),
+        ("mm", "(eol)"),
+        ("fa nop", "NOP"),
+        ("fa: db 0", ":"),
+        (" db 0", "DB"),
+        ("xx ENDS", "ENDS"),
+        ("fa org 0", "ORG"),
+    ] {
+        let source = format!(" STRUCT s\n{line}\n ENDS\n");
+        let all = definitions(&source);
+        assert_eq!(
+            all[1],
+            Err(format!("Token '{token}' not allowed within a STRUCT")),
+            "{line}"
+        );
+    }
+    // Fields count only what PasmoNext 0.1.3 meant: no item, a missing item
+    // after a comma, or an item of more than one token is refused.
+    for line in ["fa db", "fa db 1+1", "fa dw 1+1", "fa ds"] {
+        let source = format!(" STRUCT s\n{line}\n ENDS\n");
+        assert!(definitions(&source)[1].is_err(), "{line}");
+    }
+}
+
+/// The expander's messages for `source`.
+fn expander_messages(source: &str) -> Vec<String> {
+    let program =
+        Program::load("t.asm", source, Profile::PASMONEXT_0_1_3, |_| None).expect("loads");
+    let mut expander = Expander::new(program, Profile::PASMONEXT_0_1_3).expect("parses");
+    while expander.next_line(&mut Every).is_some() {}
+    expander
+        .diagnostics()
+        .iter()
+        .map(|(_, d)| d.message().to_owned())
+        .collect()
+}
+
+#[test]
+fn a_structure_needs_a_name_and_its_end() {
+    // struct_no_name, and a register for a name.
+    assert!(definitions(" STRUCT\n ENDS\n")[0].is_err());
+    assert!(definitions(" STRUCT hl\n ENDS\n")[0].is_err());
+    // struct_label_before, ends_outside and struct_without_ends.
+    assert_eq!(expander_messages("xx STRUCT s\n").len(), 1);
+    assert_eq!(expander_messages(" ENDS\n"), ["ENDS outside of STRUCT"]);
+    assert_eq!(
+        expander_messages(" STRUCT s\nfa db 0\n"),
+        ["STRUCT without ENDS"]
+    );
+}
+
+#[test]
+fn rb_rw_rsset_and_stack_are_reported_for_the_assembler() {
+    // rb_rw_basic, rb_hex_count, rsset_hex, rsset_nothing, stack_basic.
+    let reserve = |name: &str, size| {
+        Ok(Some(Definition::Reserve {
+            name: name.to_owned(),
+            size,
+        }))
+    };
+    assert_eq!(
+        definitions(" RSSET 0FFh\naa RB 10h\nbb RW 3\n RSSET\n STACK 8000h\n"),
+        [
+            Ok(Some(Definition::ReserveFrom(0xFF))),
+            reserve("aa", 0x10),
+            reserve("bb", 6),
+            Ok(Some(Definition::ReserveFrom(0))),
+            Ok(Some(Definition::Stack(0x8000))),
+        ]
+    );
+    // rsset_label_before: a label on RSSET is defined where the line stands.
+    let lowered = lower_all("xx RSSET 4\n", &Names::default())
+        .remove(0)
+        .expect("lowers");
+    assert_eq!(lowered.items[0].label.as_deref(), Some("xx"));
+    assert_eq!(lowered.definition, Some(Definition::ReserveFrom(4)));
+}
+
+#[test]
+fn rb_rw_rsset_and_stack_take_only_what_pasmonext_reads() {
+    // rb_without_label, rw_without_label, stack_label and stack_no_value are
+    // PasmoNext's refusals. rb_symbol_count, rb_no_count and rb_negative
+    // stop PasmoNext without a message, and rsset_symbol, rsset_expression
+    // and rsset_junk_after read something other than what is written; under
+    // 198x's decision on reference bugs, all of these are refused.
+    for source in [
+        " RB 1\n",
+        " RW 1\n",
+        "aa RB nn\n",
+        "aa RB\n",
+        "aa RB -1\n",
+        "aa RB 1+1\n",
+        " RSSET nn\n",
+        " RSSET 2+3\n",
+        "here STACK 8000h\n",
+        " STACK\n",
+        " STACK later\n",
+    ] {
+        assert!(definitions(source)[0].is_err(), "{source:?}");
+    }
+    assert_eq!(
+        definitions(" RB 1\n")[0],
+        Err("EQU without label".to_owned())
+    );
 }

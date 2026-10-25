@@ -120,6 +120,9 @@ pub struct ActiveLine {
     label_only: bool,
     /// The innermost macro call, `REPT` or `IRP` running the line.
     running: Option<Rc<Running>>,
+    /// Whether the line is in a structure's body, between `STRUCT` and
+    /// `ENDS`, where it is read as a field rather than run.
+    in_struct: bool,
 }
 
 /// A macro call, `REPT` or `IRP` being run, linked to the one around it, so
@@ -156,6 +159,14 @@ impl ActiveLine {
     #[must_use]
     pub fn label_only(&self) -> bool {
         self.label_only
+    }
+
+    /// Whether the line is in a structure's body, between `STRUCT` and
+    /// `ENDS`. PasmoNext reads such a line as a field, without running
+    /// macros, conditionals or repeats.
+    #[must_use]
+    pub fn in_struct(&self) -> bool {
+        self.in_struct
     }
 
     /// Returns where the whole line is, in [`text`](Self::text).
@@ -287,6 +298,8 @@ pub struct Expander {
     /// Set when a limit is reached inside a step that cannot reach the host;
     /// the next step stops.
     stopping: bool,
+    /// Where the open `STRUCT` was written, while its body is being read.
+    structure: Option<Span>,
 }
 
 impl Expander {
@@ -363,6 +376,7 @@ impl Expander {
             lines_run: 0,
             expanded_bytes: 0,
             stopping: false,
+            structure: None,
         })
     }
 
@@ -403,7 +417,9 @@ impl Expander {
                 self.stop(host);
                 continue;
             }
-            if !self.end_of_block(host) {
+            if self.structure.is_some() {
+                self.run_struct_line();
+            } else if !self.end_of_block(host) {
                 self.run_line(host);
             }
         }
@@ -606,7 +622,9 @@ impl Expander {
 
     /// The end of the program, or `END`: reports blocks left open.
     fn finish(&mut self, host: &mut dyn Host) {
-        if let Some(frame) = self.frames.last() {
+        if let Some(site) = self.structure.take() {
+            self.report_span(site, "STRUCT without ENDS");
+        } else if let Some(frame) = self.frames.last() {
             let message = match frame.kind {
                 Kind::Macro { .. } => "this macro has no ENDM before the program ends",
                 Kind::Repeat { .. } => "REPT without ENDM",
@@ -832,6 +850,13 @@ impl Expander {
             Role::Endm => self.report_current(current, "ENDM outside of a macro"),
             Role::Exitm => self.report_current(current, "EXITM outside of a macro or repeat"),
             Role::Shift => self.report_current(current, "`.SHIFT` is not inside a macro"),
+            // `parseSTRUCT`: the line is the host's, and the lines after it
+            // are the structure's body until `ENDS`.
+            Role::Struct => {
+                self.structure = Some(current_span(current));
+                self.hand_over(current_clone(current), false);
+            }
+            Role::Ends => self.report_current(current, "ENDS outside of STRUCT"),
             Role::Include | Role::None => {}
         }
     }
@@ -1107,6 +1132,28 @@ impl Expander {
             offset: current.offset,
             label_only,
             running: self.frames.last().map(|frame| Rc::clone(&frame.running)),
+            in_struct: false,
+        });
+    }
+
+    /// A line of a structure's body (`parseSTRUCT`): handed over as it is,
+    /// for the host to read as a field, until `ENDS`, which closes it.
+    fn run_struct_line(&mut self) {
+        let Some(current) = self.current() else {
+            return;
+        };
+        if head::word(current.tokens.first(), &self.profile.grammar) == Word::Block(Role::Ends) {
+            self.structure = None;
+            self.hand_over(current, false);
+            return;
+        }
+        self.queue.push_back(ActiveLine {
+            line: current.line,
+            text: current.text,
+            offset: current.offset,
+            label_only: false,
+            running: self.frames.last().map(|frame| Rc::clone(&frame.running)),
+            in_struct: true,
         });
     }
 

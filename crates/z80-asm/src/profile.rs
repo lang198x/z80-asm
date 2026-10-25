@@ -152,6 +152,11 @@ pub(crate) enum Role {
     End,
     /// Reads in another file, such as `INCLUDE`.
     Include,
+    /// Starts a structure, such as `STRUCT`, whose lines are read as its
+    /// fields rather than run.
+    Struct,
+    /// Ends a structure, such as `ENDS`.
+    Ends,
 }
 
 /// The shape of a directive's operands.
@@ -416,8 +421,8 @@ const PASMONEXT_DIRECTIVES: &[Directive] = &[
     directive("SAVEBIN", Operands::FileNameThenExpressions),
     directive("MESSAGE", Operands::Tokens),
     directive("HEX", Operands::Text),
-    directive("STRUCT", Operands::Expressions),
-    directive("ENDS", Operands::Expressions),
+    block("STRUCT", Operands::Expressions, Role::Struct),
+    block("ENDS", Operands::Expressions, Role::Ends),
     // Reserved by PasmoNext's tokenizer but with no handler, so using it is
     // an error.
     directive("FMESSAGE", Operands::Expressions),

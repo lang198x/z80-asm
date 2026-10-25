@@ -8,7 +8,9 @@ use asm198x_ir::{Expr as Ir, Operation};
 
 use super::expr::{self, Known, Problem};
 use super::instruction::{low_byte, meaningful_tokens};
-use super::{Item, Scope};
+use super::{Definition, Item, Lowered, Scope};
+use lang198x_syntax::SyntaxToken;
+
 use crate::ast::{self, Operand, View};
 use crate::expand::unquote;
 use crate::kinds;
@@ -16,14 +18,14 @@ use crate::lexer::{number_value, string_bytes};
 use crate::profile::Profile;
 
 /// Lowers `directive`, with the line's `label`, to the statements it makes
-/// and the change it makes to the scopes, if any.
+/// and the change it makes to the scopes or definitions, if any.
 pub(super) fn lower(
     directive: &ast::Directive,
     label: Option<String>,
     profile: &Profile,
     known: &dyn Known,
     binaries: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
-) -> Result<(Vec<Item>, Option<Scope>), Problem> {
+) -> Result<Lowered, Problem> {
     let keyword = directive
         .keyword()
         .map(|t| t.text().to_ascii_uppercase())
@@ -35,23 +37,30 @@ pub(super) fn lower(
         operands: directive.operands().collect(),
     };
     let item = |op| {
-        (
-            vec![Item {
-                label: label.clone(),
-                op,
-            }],
-            None,
+        Lowered::of(vec![Item {
+            label: label.clone(),
+            op,
+        }])
+    };
+    // The line's label alone, defined where the line stands.
+    let label_only = || {
+        Lowered::of(
+            label
+                .iter()
+                .map(|name| Item {
+                    label: Some(name.clone()),
+                    op: None,
+                })
+                .collect(),
         )
     };
-    let scope = |scope| {
-        let items = label
-            .iter()
-            .map(|name| Item {
-                label: Some(name.clone()),
-                op: None,
-            })
-            .collect();
-        (items, Some(scope))
+    let scope = |scope| Lowered {
+        scope: Some(scope),
+        ..label_only()
+    };
+    let definition = |definition| Lowered {
+        definition: Some(definition),
+        ..Lowered::of(Vec::new())
     };
     Ok(match keyword.as_str() {
         // `parseLOCAL`, `parsePROC` and `parseENDP`. A label on the line is
@@ -72,6 +81,57 @@ pub(super) fn lower(
             return Err(lowering.problem("Unexpected 'PUBLIC' used as instruction"));
         }
         "PUBLIC" => scope(Scope::Public(lowering.names()?)),
+        // `parseSTRUCT`: the lines up to `ENDS` are its fields, which the
+        // expander hands over as such. After a label, PasmoNext reads the
+        // word as an instruction.
+        "STRUCT" | "STACK" if label.is_some() => {
+            return Err(lowering.problem(format!("Unexpected '{keyword}' used as instruction")));
+        }
+        "STRUCT" => definition(Definition::Struct(lowering.struct_name()?)),
+        "ENDS" => {
+            lowering.only(0)?;
+            definition(Definition::EndStruct)
+        }
+        // `parseRB` and `parseRW`. PasmoNext reads the count with
+        // `Token::num`, whatever the token is, and stops without a message
+        // when it is not a number; a count must be one.
+        "RB" | "RW" => {
+            let Some(name) = label else {
+                return Err(lowering.problem("EQU without label"));
+            };
+            let count = lowering.number().ok_or_else(|| {
+                lowering.problem(format!(
+                    "`{keyword}` takes a number; PasmoNext 0.1.3 stops without a message here"
+                ))
+            })?;
+            let size = if keyword == "RW" { count * 2 } else { count };
+            definition(Definition::Reserve { name, size })
+        }
+        // `parseRSSET`: nothing sets the counter to 0. PasmoNext reads
+        // anything but a number as 0, and drops whatever follows; only a
+        // number is taken.
+        "RSSET" => {
+            let value = if lowering.operands.is_empty() {
+                0
+            } else {
+                lowering.number().ok_or_else(|| {
+                    lowering.problem(
+                        "`RSSET` takes a number; PasmoNext 0.1.3 reads anything else as 0 and \
+                         drops the rest of the line",
+                    )
+                })?
+            };
+            Lowered {
+                definition: Some(Definition::ReserveFrom(value)),
+                ..label_only()
+            }
+        }
+        // `parseSTACK`: a value PasmoNext needs as it reads the line.
+        "STACK" => {
+            lowering.some()?;
+            lowering.only(1)?;
+            definition(Definition::Stack(lowering.required(0)?))
+        }
         // `parseORG`: the label takes the new address, and the rest of the
         // line is never read.
         "ORG" => {
@@ -83,7 +143,7 @@ pub(super) fn lower(
             if label.is_some() {
                 items.push(Item { label, op: None });
             }
-            (items, None)
+            Lowered::of(items)
         }
         "EQU" | "DEFL" => {
             if label.is_none() {
@@ -131,6 +191,78 @@ pub(super) fn lower(
             ));
         }
     })
+}
+
+/// Lowers a line of a structure's body (`parseSTRUCT`) to the field it
+/// defines, or to nothing for a blank or comment line. A field is a name and
+/// a `DB`, `DW` or `DS` of what it takes; the values are not kept.
+pub(super) fn field(
+    line: &ast::Line,
+    profile: &Profile,
+    known: &dyn Known,
+) -> Result<Option<Definition>, Problem> {
+    let not_allowed =
+        |word: &str| Problem::at(line, format!("Token '{word}' not allowed within a STRUCT"));
+    let statement = line.statement();
+    let Some(label) = line.label() else {
+        return match statement {
+            None => Ok(None),
+            Some(statement) => {
+                let word = meaningful_tokens(statement.syntax())
+                    .first()
+                    .map(|t| t.text().to_ascii_uppercase())
+                    .unwrap_or_default();
+                Err(not_allowed(&word))
+            }
+        };
+    };
+    if label.colon().is_some() {
+        return Err(not_allowed(":"));
+    }
+    let name = label
+        .name()
+        .map(|token| profile.grammar.name(token.text()))
+        .ok_or_else(|| Problem::at(line, "expected the field's name"))?;
+    let directive = match statement {
+        None => return Err(not_allowed("(eol)")),
+        Some(ast::Statement::Directive(directive)) => directive,
+        Some(other) => {
+            let word = meaningful_tokens(other.syntax())
+                .first()
+                .map(|t| t.text().to_ascii_uppercase())
+                .unwrap_or_default();
+            return Err(not_allowed(&word));
+        }
+    };
+    let keyword = directive
+        .keyword()
+        .map(|t| t.text().to_ascii_uppercase())
+        .unwrap_or_default();
+    let lowering = Lowering {
+        directive: &directive,
+        profile,
+        known,
+        operands: directive.operands().collect(),
+    };
+    let size = match keyword.as_str() {
+        "DB" | "DEFB" | "DEFM" => lowering.counted(|token| {
+            match token
+                .filter(|t| t.kind() == kinds::STRING)
+                .and_then(|t| string_bytes(t.text(), &profile.lexical))
+            {
+                Some(bytes) => bytes.len() as i64,
+                None => 1,
+            }
+        })?,
+        "DW" | "DEFW" => lowering.counted(|_| 2)?,
+        // The count is needed now; a fill after it is not read.
+        "DS" | "DEFS" => {
+            lowering.some()?;
+            lowering.required(0)?
+        }
+        _ => return Err(not_allowed(&keyword)),
+    };
+    Ok(Some(Definition::Field { name, size }))
 }
 
 struct Lowering<'a> {
@@ -198,6 +330,61 @@ impl Lowering<'_> {
                 }
             })
             .collect()
+    }
+
+    /// The bytes a structure's `DB` or `DW` field takes: for each operand,
+    /// which must be one token, what `size` gives that token. PasmoNext
+    /// counts a missing operand, as `fa db` or `fa db 1,`, as a byte; that
+    /// is one of its bugs, and such a field is refused.
+    fn counted(&self, size: impl Fn(Option<&SyntaxToken>) -> i64) -> Result<i64, Problem> {
+        self.some()?;
+        self.operands
+            .iter()
+            .map(
+                |operand| match meaningful_tokens(operand.syntax()).as_slice() {
+                    [token] => Ok(size(Some(token))),
+                    [_, next, ..] => {
+                        Err(self.problem(format!("Expected ',' but '{}' found", next.text())))
+                    }
+                    [] => Err(self.problem("Value expected")),
+                },
+            )
+            .sum()
+    }
+
+    /// The one operand, if it is a number written alone.
+    fn number(&self) -> Option<i64> {
+        let [operand] = self.operands.as_slice() else {
+            return None;
+        };
+        match meaningful_tokens(operand.syntax()).as_slice() {
+            [token] if token.kind() == kinds::NUMBER => {
+                number_value(token.text(), &self.profile.lexical)
+                    .and_then(|n| i64::try_from(n).ok())
+            }
+            _ => None,
+        }
+    }
+
+    /// `STRUCT`'s name: one name that is not a register or a keyword.
+    fn struct_name(&self) -> Result<String, Problem> {
+        let first = self
+            .operands
+            .first()
+            .and_then(|operand| meaningful_tokens(operand.syntax()).into_iter().next());
+        let Some(token) = first else {
+            return Err(self.problem("Identifier expected but '(eol)'found"));
+        };
+        self.only(1)?;
+        let grammar = &self.profile.grammar;
+        let single = self.operands.first().is_some_and(|operand| {
+            meaningful_tokens(operand.syntax()).len() == 1
+                && matches!(operand.expr(), Some(ast::Expr::Name(_)))
+        });
+        if !single || grammar.is_reserved(token.text()) || grammar.is_keyword(token.text()) {
+            return Err(self.problem(format!("Identifier expected but '{}'found", token.text())));
+        }
+        Ok(grammar.name(token.text()))
     }
 
     /// Fails unless there is at least one operand.
