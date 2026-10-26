@@ -413,8 +413,13 @@ Design agreed 2026-10-23.
     6. **Reading options:** `--bracket` (only brackets are indirection) and
        `--w8080` (warnings for what the 8080 lacks).
     7. **Three-pass mode,** in Asm198x's walk: see *The boundary* below.
-    8. **`--86`, last:** PasmoNext's translation of Z80 source into 8086
-       code. Asm198x has no verdicts for it, so they are recorded first.
+    8. **`--86`, deferred (2026-10-26):** PasmoNext's experimental
+       translation of Z80 source into 8086 code. It waits for 8086 support
+       in Isa198x and Asm198x, which neither has: the CPU roadmap puts the
+       8086 in its new-encoding-model tier. That support comes first, on its
+       own terms and measured against real 8086 assemblers. `--86` can then
+       follow as a layer over it, with its verdicts recorded on PasmoNext
+       first. Until then, PasmoNext with `--86` is not a supported surface.
 - **The boundary (amended 2026-10-23).** An earlier version of this plan put
   a layout host and a pass loop in z80-asm. That made z80-asm do layout to
   decide `IF` and `REPT`, and Asm198x do it again to make the bytes, and
