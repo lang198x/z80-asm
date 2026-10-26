@@ -136,6 +136,21 @@ struct Running {
     outer: Option<Rc<Running>>,
 }
 
+/// Dropping a deep chain one link at a time, so a chain as deep as the frame
+/// limit never recurses as deep as that: diagnostics keep the innermost link
+/// after the frames have gone.
+impl Drop for Running {
+    fn drop(&mut self) {
+        let mut outer = self.outer.take();
+        while let Some(link) = outer {
+            outer = match Rc::try_unwrap(link) {
+                Ok(mut running) => running.outer.take(),
+                Err(_) => None,
+            };
+        }
+    }
+}
+
 impl ActiveLine {
     /// Returns the line.
     #[must_use]
