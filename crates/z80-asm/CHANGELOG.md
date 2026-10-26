@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5](https://github.com/lang198x/z80-asm/compare/lang198x-z80-asm-v0.2.4...lang198x-z80-asm-v0.2.5) - 2026-10-26
+
+### Added
+
+- lay out PasmoNext source without changing what it says
+
 ## [0.2.4](https://github.com/lang198x/z80-asm/compare/lang198x-z80-asm-v0.2.3...lang198x-z80-asm-v0.2.4) - 2026-10-26
 
 What Asm198x needs to make this front end its default for PasmoNext while
