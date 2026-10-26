@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4](https://github.com/lang198x/z80-asm/compare/lang198x-z80-asm-v0.2.3...lang198x-z80-asm-v0.2.4) - 2026-10-26
+
+### Added
+
+- say where macros were defined, and the calls running each problem
+
+### Fixed
+
+- drop a deep chain of running calls one link at a time
+
 ## [0.2.3](https://github.com/lang198x/z80-asm/compare/lang198x-z80-asm-v0.2.2...lang198x-z80-asm-v0.2.3) - 2026-10-25
 
 Text after `ELSE`, `ENDIF` and `ENDM` is now rejected. PasmoNext 0.1.3 rejects
