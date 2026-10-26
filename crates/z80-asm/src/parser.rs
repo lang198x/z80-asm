@@ -298,7 +298,16 @@ impl Parser<'_> {
             self.bump();
             match directive.operands {
                 Operands::Expressions => self.operands(false),
-                Operands::FileName => self.file_name(),
+                Operands::FileName => {
+                    self.file_name();
+                    if !self.at_line_end() {
+                        let message = format!(
+                            "`{}` takes only a file name",
+                            directive.name.to_ascii_lowercase()
+                        );
+                        self.error_to_line_end(&message);
+                    }
+                }
                 Operands::FileNameThenExpressions => {
                     self.file_name();
                     if self.next_kind() == Some(kinds::COMMA) {
