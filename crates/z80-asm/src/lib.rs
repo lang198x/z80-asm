@@ -20,6 +20,7 @@
 
 pub mod ast;
 pub mod expand;
+mod format;
 /// The shared tree, spans and diagnostics this crate's API is written in, so
 /// a caller uses the same version of them.
 pub use lang198x_syntax as syntax;
@@ -33,6 +34,7 @@ mod parser;
 mod predefine;
 mod profile;
 
+pub use format::format;
 pub use lexer::{Lexed, Token, lex};
 pub use parser::{ParseError, parse, parse_with_macros};
 pub use predefine::predefine;
