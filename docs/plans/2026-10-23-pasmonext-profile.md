@@ -620,6 +620,21 @@ Design agreed 2026-10-23.
     sweep (the 40 it warned about are in `pasmonext-0.1.3-looks.tsv`) and 20
     more.
 
+- **As built, the formatter** (2026-10-26): `format(text, profile)`, under
+  the shared syntax layer decision's rules for line-oriented languages. It
+  never adds, removes or reorders lines. Labels start in column 1 and
+  statements at column 9, or one space after a longer label. A statement's
+  own text is kept exactly as written, and a comment after it starts at
+  column 33. Comment-only lines, lines the parser could not read, and
+  macro bodies are kept as written, and spaces at the end of a line go.
+  - **Gates:** property tests check that formatting twice changes nothing
+    and that every token but spaces is kept. PasmoNext 0.1.3 assembled all
+    618 Spectrum curriculum sources before and after formatting, with 1,018
+    files changed. It gave the same bytes and symbol file for all 614 it
+    assembles, and rejected the same 4. It also gave the same verdict for
+    all 1,230 `pasmo` and `pasmonext` verdict sources, of which formatting
+    changed 71.
+
 ### 6. The gate, in Asm198x
 
 Pull requests to `asm198x/asm198x`, after publishing `lang198x-z80-asm`.
