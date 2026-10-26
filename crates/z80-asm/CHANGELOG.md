@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.5](https://github.com/lang198x/z80-asm/compare/lang198x-z80-asm-v0.2.4...lang198x-z80-asm-v0.2.5) - 2026-10-26
 
+A formatter for PasmoNext source, `format(text, profile)`. It never adds,
+removes or reorders lines: a label moves to column 1, a statement to column 9
+and a trailing comment to column 33, each kept exactly as written, and
+comment-only lines, unreadable lines and macro bodies are kept as written.
+PasmoNext 0.1.3 assembled the Spectrum curriculum and every recorded verdict
+source to the same bytes and symbols before and after formatting.
+
 ### Added
 
 - lay out PasmoNext source without changing what it says
