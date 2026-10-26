@@ -265,7 +265,7 @@ pub fn line(
         Some(Statement::MacroCall(call)) => Err(Problem::at(
             &call,
             format!(
-                "`{}` is not an instruction or a macro defined above",
+                "unknown instruction `{}`: it is not an instruction or a macro defined above",
                 call.name().map(|t| t.text().to_owned()).unwrap_or_default()
             ),
         )),

@@ -184,13 +184,7 @@ fn data_is_written_as_pasmonext_writes_it() {
         assert_eq!(data(&op(text), &none()), expected, "{text}");
     }
     // ds_negative: a count of -1 is 65535 bytes.
-    assert!(matches!(
-        op("ds -1"),
-        Operation::Fill {
-            count: Ir::Num(65535),
-            value: 0
-        }
-    ));
+    assert!(matches!(op("ds -1"), Operation::Bytes(bytes) if bytes.len() == 65535));
 }
 
 #[test]
@@ -833,4 +827,13 @@ fn with_8080_warnings_each_z80_instruction_is_warned_about() {
     }
     // Directives are not instructions, so they have no warning.
     assert_eq!(warning("db 0", warns), None);
+}
+
+#[test]
+fn an_unknown_word_is_an_unknown_instruction() {
+    let problem = rejected(" frobnicate 1", &Names::default());
+    assert_eq!(
+        problem.message(),
+        "unknown instruction `frobnicate`: it is not an instruction or a macro defined above"
+    );
 }

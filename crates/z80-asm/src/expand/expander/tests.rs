@@ -1128,7 +1128,7 @@ fn endless_recursion_stops_at_the_frame_limit() {
     let run = run(" org 0\nm1 macro\n m1\n endm\n m1\n");
     assert_eq!(
         run.problems,
-        ["macros and repeats nest more than 10000 deep; does a macro call itself?"]
+        ["macros and repeats nest more than 10000 deep at `m1`; does it call itself?"]
     );
 }
 

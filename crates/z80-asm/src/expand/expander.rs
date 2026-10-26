@@ -131,6 +131,8 @@ pub struct ActiveLine {
 struct Running {
     name: String,
     site: Span,
+    /// The `MACRO` line, for a macro call.
+    defined: Option<Span>,
     outer: Option<Rc<Running>>,
 }
 
@@ -286,6 +288,8 @@ pub struct Expander {
     frames: Vec<Frame>,
     macros: HashMap<String, Rc<MacroDef>>,
     diagnostics: Vec<(TextId, Diagnostic)>,
+    /// For each of `diagnostics`, the calls running when it was reported.
+    diagnostic_calls: Vec<Option<Rc<Running>>>,
     /// Diagnostics already reported, so a line run many times reports each
     /// problem once.
     reported: HashSet<(TextId, Diagnostic)>,
@@ -369,6 +373,7 @@ impl Expander {
             frames: Vec::new(),
             macros: HashMap::new(),
             reported: diagnostics.iter().cloned().collect(),
+            diagnostic_calls: vec![None; diagnostics.len()],
             diagnostics,
             queue: VecDeque::new(),
             pending: None,
@@ -623,14 +628,15 @@ impl Expander {
     fn push(
         &mut self,
         kind: Kind,
-        (name, site): (&str, Span),
+        (name, site, defined): (&str, Span, Option<Span>),
         block: Block,
         host: &mut dyn Host,
     ) -> bool {
         if self.frames.len() >= self.limits.frames {
             let max = self.limits.frames;
             self.report_here(format!(
-                "macros and repeats nest more than {max} deep; does a macro call itself?"
+                "macros and repeats nest more than {max} deep at `{name}`; does \
+                 it call itself?"
             ));
             self.stop(host);
             return false;
@@ -638,6 +644,7 @@ impl Expander {
         let running = Rc::new(Running {
             name: name.to_owned(),
             site,
+            defined,
             outer: self.frames.last().map(|frame| Rc::clone(&frame.running)),
         });
         self.frames.push(Frame {
@@ -1062,12 +1069,21 @@ impl Expander {
         let start = args_start(&pieces, current, args);
         let args = substitute::args(&pieces[start..]);
         let body = def.line;
+        let defined = self
+            .lines
+            .get(body)
+            .map(|line| Span::new(self.program, line.syntax().text_range()));
         let kind = Kind::Macro {
             def,
             args,
             return_to: self.cursor.unwrap_or(0),
         };
-        if self.push(kind, (name, current_span(current)), Block::Macro, host) {
+        if self.push(
+            kind,
+            (name, current_span(current), defined),
+            Block::Macro,
+            host,
+        ) {
             self.cursor = Some(body);
         }
     }
@@ -1131,7 +1147,7 @@ impl Expander {
             done: 0,
             counter,
         };
-        if self.push(kind, ("REPT", site), Block::Repeat, host)
+        if self.push(kind, ("REPT", site, None), Block::Repeat, host)
             && let Some((name, value)) = first
         {
             host.set_counter(&name, value);
@@ -1166,7 +1182,7 @@ impl Expander {
             values,
             index: 0,
         };
-        self.push(kind, ("IRP", current_span(current)), Block::Irp, host);
+        self.push(kind, ("IRP", current_span(current), None), Block::Irp, host);
     }
 
     // Handing lines over.
@@ -1292,6 +1308,8 @@ impl Expander {
     fn push_diagnostic(&mut self, text: TextId, diagnostic: Diagnostic) {
         if self.reported.insert((text, diagnostic.clone())) {
             self.diagnostics.push((text, diagnostic));
+            self.diagnostic_calls
+                .push(self.frames.last().map(|frame| Rc::clone(&frame.running)));
         }
     }
 

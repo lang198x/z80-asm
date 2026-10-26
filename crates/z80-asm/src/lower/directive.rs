@@ -597,25 +597,17 @@ impl Lowering<'_> {
     }
 
     /// `parseDEFS`: a count PasmoNext needs as it reads the line, and a fill
-    /// byte that may be defined further on.
+    /// byte that may be defined further on. The bytes are data the line
+    /// writes, as `DEFB` would, so a debugger maps them to the line.
     fn space(&self) -> Result<Operation, Problem> {
         self.only(2)?;
         let count = self.required(0)?;
-        if self.operands.len() < 2 {
-            return Ok(Operation::Fill {
-                count: Ir::Num(count),
-                value: 0,
-            });
-        }
-        let fill = self.value(1)?;
-        let folded = fill.eval_with(&|name| self.known.value(name), self.known.pc(), 0);
-        Ok(match folded {
-            Ok(value) => Operation::Fill {
-                count: Ir::Num(count),
-                value: value as u8,
-            },
-            Err(_) => Operation::Bytes(vec![low_byte(fill); count as usize]),
-        })
+        let fill = if self.operands.len() < 2 {
+            Ir::Num(0)
+        } else {
+            low_byte(self.value(1)?)
+        };
+        Ok(Operation::Bytes(vec![fill; count as usize]))
     }
 
     /// `parseALIGN`: one number, written as a number, which is all

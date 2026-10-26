@@ -80,6 +80,10 @@ fn calls_are_listed_innermost_first() {
     assert_eq!(names, ["REPT", "twice"]);
     assert_eq!(calls[0].at.line, 4);
     assert_eq!(calls[1].at.line, 8);
+    // A macro call says where its `MACRO` line is; a repeat's body follows
+    // its own line.
+    assert_eq!(calls[0].defined, None);
+    assert_eq!(calls[1].defined.map(|d| d.line), Some(3));
 }
 
 #[test]
@@ -96,4 +100,23 @@ fn a_span_from_elsewhere_has_no_location() {
         TextRange::empty(TextSize::ZERO),
     );
     assert_eq!(expander.locate(foreign), None);
+}
+
+#[test]
+fn a_problem_in_a_macro_body_names_the_calls_running_it() {
+    const SOURCE: &str = "boom macro\n ld a,(\n endm\n boom\n";
+    let program =
+        Program::load("main.asm", SOURCE, Profile::PASMONEXT_0_1_3, |_| None).expect("loads");
+    let mut expander = Expander::new(program, Profile::PASMONEXT_0_1_3).expect("parses");
+    while expander.next_line(&mut Every).is_some() {}
+    let index = expander
+        .diagnostics()
+        .iter()
+        .position(|(_, d)| d.message() == "expected a value")
+        .expect("the body's problem");
+    let calls = expander.diagnostic_calls(index);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "boom");
+    assert_eq!(calls[0].at.line, 4);
+    assert_eq!(calls[0].defined.map(|d| d.line), Some(1));
 }

@@ -222,6 +222,10 @@ fn file_names_are_strings_or_run_to_the_next_space() {
         ["12..16 expected `,` or the end of the line"]
     );
     assert_eq!(problems("include"), ["7..7 expected a file name"]);
+    assert_eq!(
+        problems("incbin \"a.bin\",2"),
+        ["14..16 `incbin` takes only a file name"]
+    );
 }
 
 /// The diagnostics of `text` as `start..end kind message`, read with

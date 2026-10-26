@@ -25,6 +25,9 @@ pub struct Call {
     pub name: String,
     /// Where the call is.
     pub at: Location,
+    /// Where a macro call's `MACRO` line is. `None` for `REPT` and `IRP`,
+    /// whose body follows the call.
+    pub defined: Option<Location>,
 }
 
 /// The offset of each line's start in `text`.
@@ -69,13 +72,26 @@ impl Expander {
     /// innermost first. A line outside them has none.
     #[must_use]
     pub fn calls(&self, line: &ActiveLine) -> Vec<Call> {
+        self.calls_from(line.running.as_deref())
+    }
+
+    /// Returns the macro calls, `REPT`s and `IRP`s that were running when
+    /// the [diagnostic](Expander::diagnostics) at `index` was reported,
+    /// innermost first.
+    #[must_use]
+    pub fn diagnostic_calls(&self, index: usize) -> Vec<Call> {
+        self.calls_from(self.diagnostic_calls.get(index).and_then(Option::as_deref))
+    }
+
+    fn calls_from(&self, running: Option<&super::Running>) -> Vec<Call> {
         let mut calls = Vec::new();
-        let mut running = line.running.as_deref();
+        let mut running = running;
         while let Some(call) = running {
             if let Some(at) = self.locate(call.site) {
                 calls.push(Call {
                     name: call.name.clone(),
                     at,
+                    defined: call.defined.and_then(|span| self.locate(span)),
                 });
             }
             running = call.outer.as_deref();
