@@ -1,6 +1,7 @@
 # Plan: a SjASMPlus profile for the Z80 family parser
 
-**Status:** Proposed 2026-10-26, for agreement before any code.
+**Status:** Agreed 2026-10-26: step 1 now, steps 2 to 7 deferred until after
+ca65's stage 3.
 **Binding records:** Lang198x's
 [shared syntax layer decision](https://github.com/lang198x/lang198x/blob/main/decisions/shared-syntax-layer.md)
 and 198x's
@@ -22,8 +23,12 @@ syntax. asm198x#985 starts on that from the Asm198x side: every Z80 and Z80N
 instruction form is now recorded against SjASMPlus 1.24.0, and all of them
 agree.
 
-The record numbers ca65 as stage 3. This plan does not change that; it is a
-stage 6 move that happens first, because the comparator is wanted now.
+The record numbers ca65 as stage 3, and that order holds (agreed 2026-10-26).
+Step 1 is the comparator, and it needs no front end, so it happens now in
+Asm198x. The rest of this plan moves syntax rather than checking the Z80, and
+it waits until ca65's stage 3 is done, since that stage also freezes ca65
+parity fixes in the old readers. Until then the old `sjasmplus` reader stays
+the default, and its gaps are fixed there as ordinary bugs.
 
 ## Settled before starting
 
@@ -84,12 +89,18 @@ starts on.
 Each step is one pull request that passes format, Clippy, tests and the 95%
 coverage floor.
 
-### 1. More verdicts first (Asm198x)
+### 1. More verdicts first (Asm198x, now)
 
 - Record a SjASMPlus fuzz suite beside the PasmoNext one, for Z80 and Z80N.
 - Turn each axis in the table above into probes, including the rejections.
   The probe helper must read the exit code: SjASMPlus exits 1 on an error but
   still writes its output file.
+- **As built:** asm198x#985 recorded every Z80 and Z80N form, and asm198x#987
+  300 fuzz programs and 19 probes. Every form and program agrees. Seven
+  probes are source the old reader refuses, and one it accepts that
+  SjASMPlus refuses (asm198x#986); those are fixed in the old reader.
+
+Steps 2 to 7 are deferred until ca65's stage 3 is done.
 
 ### 2. Profile axes and lexer
 
@@ -115,8 +126,12 @@ SjASMPlus warns about and resolves across passes.
 
 ### 6. Lua
 
-`LUA`…`ENDLUA` stays an opaque block in the tree. Running it stays in
-Asm198x, which already does.
+`LUA`…`ENDLUA` stays an opaque block in the tree: its text is Lua, not
+assembly, and a Lua runtime would break the syntax crates' rule of no runtime
+dependencies. Running it stays in Asm198x, which already does, sandboxed,
+behind its optional `lua` feature (`decisions/sjasmplus-lua.md`). Lua can
+emit assembly lines; those go back through this crate's parser, as macro
+expansions do. No curriculum program uses Lua, so this is the last step.
 
 ### 7. The switch
 
@@ -124,7 +139,7 @@ The same order as PasmoNext: make the walk the default, move `fmt` onto this
 crate's formatter, then delete the old layer. `convert` (pasmo to sjasmplus)
 moves to Lang198x's tree at the same time, and `PasmoSyntax` goes with it.
 
-## Questions to settle
+## Settled 2026-10-26
 
-1. Is starting SjASMPlus ahead of ca65 right, with the order recorded as above?
-2. Should Lua stay opaque here and run in Asm198x, as step 6 proposes?
+1. ca65's stage 3 comes first; only step 1 happens now.
+2. Lua stays opaque here and runs in Asm198x, as step 6 says.
