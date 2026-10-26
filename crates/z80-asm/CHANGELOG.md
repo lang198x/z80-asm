@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.4](https://github.com/lang198x/z80-asm/compare/lang198x-z80-asm-v0.2.3...lang198x-z80-asm-v0.2.4) - 2026-10-26
 
+What Asm198x needs to make this front end its default for PasmoNext while
+keeping its diagnostics contract. `Call::defined` gives a macro call's `MACRO`
+line, and `Expander::diagnostic_calls` gives the calls running when each
+diagnostic was reported. An unknown word is now an "unknown instruction", text
+after `INCBIN`'s file name says it takes only a file name, and the nesting
+limit names the macro that hit it. `DEFS` lowers to the bytes it writes, so a
+debugger maps them to the line as it does for `DEFB`.
+
 ### Added
 
 - say where macros were defined, and the calls running each problem
