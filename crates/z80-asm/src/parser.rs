@@ -225,10 +225,13 @@ impl Parser<'_> {
         }
         let word = self.text_at(self.pos).to_owned();
         let colon = self.peek_nth(1) == Some(kinds::COLON);
-        // A reserved word is never a label, even with a colon: PasmoNext
-        // rejects `pc:` and `a: nop`.
+        // A reserved word, instruction or directive is never a label, even
+        // with a colon: PasmoNext reads it as the statement, so it rejects
+        // `pc:` and `a: nop`, and `halt:` and `org:` at the colon. A macro's
+        // name with a colon is a label.
         if self.is_reserved(&word)
-            || (!colon && (self.is_keyword(&word) || self.starts_macro_call(&word)))
+            || self.is_keyword(&word)
+            || (!colon && self.starts_macro_call(&word))
         {
             return None;
         }
@@ -277,6 +280,30 @@ impl Parser<'_> {
             )
     }
 
+    /// An instruction or directive followed by a colon. PasmoNext reads the
+    /// word as the statement, never as a label, and rejects the colon, so
+    /// `halt:` and `org:` are errors. It also takes `ret:` as `ret`, because
+    /// its `ret` ignores any one word after it; that is its bug, so the
+    /// colon is rejected there too.
+    fn keyword_with_colon(&mut self, word: String) {
+        let kind = if self.is_mnemonic(&word) {
+            kinds::INSTRUCTION
+        } else {
+            kinds::DIRECTIVE
+        };
+        self.builder.start_node(kind);
+        self.bump();
+        self.builder.finish_node();
+        let what = if kind == kinds::INSTRUCTION {
+            "an instruction"
+        } else {
+            "a directive"
+        };
+        self.error_to_line_end(&format!(
+            "`{word}` is {what}, so `{word}:` cannot define a label"
+        ));
+    }
+
     fn statement(&mut self, label: Option<&str>) {
         self.trivia();
         if self.current() != Some(kinds::IDENT) {
@@ -287,6 +314,10 @@ impl Parser<'_> {
         if !self.is_keyword(word) && self.is_reserved(word) {
             let message = format!("`{word}` is a reserved word, so it cannot start a statement");
             self.error_to_line_end(&message);
+            return;
+        }
+        if self.peek_nth(1) == Some(kinds::COLON) && self.is_keyword(word) {
+            self.keyword_with_colon(word.to_owned());
             return;
         }
         if self.is_mnemonic(word) {
