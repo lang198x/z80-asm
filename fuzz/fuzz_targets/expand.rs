@@ -44,7 +44,7 @@ libfuzzer_sys::fuzz_target!(|text: &str| {
     let mut limits = Limits::default();
     limits.frames = 256;
     limits.lines = 50_000;
-    limits.expanded_bytes = 1024 * 1024;
+    limits.expanded_bytes = 256 * 1024;
     let Ok(mut expander) = Expander::with_limits(program, Profile::PASMONEXT_0_1_3, limits) else {
         return;
     };
