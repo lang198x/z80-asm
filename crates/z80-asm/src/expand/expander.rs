@@ -751,8 +751,9 @@ impl Expander {
         let id = TextId::Expansion(self.provenance.add(expansion).ok()?);
         let parse = parse_with_macros(&source, self.profile, self.macros.keys().cloned()).ok()?;
         let lexical = lex(&source, self.profile);
+        let lexical: HashSet<&Diagnostic> = lexical.diagnostics().iter().collect();
         for diagnostic in parse.diagnostics() {
-            if !lexical.diagnostics().contains(diagnostic) {
+            if !lexical.contains(diagnostic) {
                 self.push_diagnostic(id, diagnostic.clone());
             }
         }
