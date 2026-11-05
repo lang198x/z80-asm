@@ -718,3 +718,42 @@ fn parentheses_followed_by_more_of_the_operand_group_an_expression() {
     // Brackets never group.
     assert!(!problems("ld b,[1]+1").is_empty());
 }
+
+#[test]
+fn an_instruction_or_directive_with_a_colon_is_never_a_label() {
+    // Measured on PasmoNext 0.1.3: each line is its statement, and the colon
+    // is an error. `ret:` assembles there only because PasmoNext's `ret`
+    // ignores any one word after it, which is its bug, not a label.
+    for (text, word, what) in [
+        ("halt:", "halt", "an instruction"),
+        ("nop:", "nop", "an instruction"),
+        ("di:", "di", "an instruction"),
+        ("ret:", "ret", "an instruction"),
+        ("HALT :", "HALT", "an instruction"),
+        ("jp:", "jp", "an instruction"),
+        ("push:", "push", "an instruction"),
+        ("org:", "org", "a directive"),
+        ("db:", "db", "a directive"),
+        ("equ:", "equ", "a directive"),
+        ("include:", "include", "a directive"),
+    ] {
+        let colon = text.find(':').unwrap();
+        assert_eq!(
+            problems(text),
+            [format!(
+                "{colon}..{} `{word}` is {what}, so `{word}:` cannot define a label",
+                colon + 1
+            )],
+            "{text}"
+        );
+        assert!(!line(text).contains("LABEL"), "{text}: {}", line(text));
+    }
+    assert_eq!(
+        problems("foo: nop: halt"),
+        ["8..14 `nop` is an instruction, so `nop:` cannot define a label"]
+    );
+    // An ordinary name and a macro's name still make labels with a colon.
+    assert_eq!(line("loop: nop"), "(LINE (LABEL loop :) (INSTRUCTION nop))");
+    let parse = parsed("m1 macro\n nop\n endm\nm1:\n");
+    assert!(parse.diagnostics().is_empty(), "{:?}", parse.diagnostics());
+}
