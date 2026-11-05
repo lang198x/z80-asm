@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6](https://github.com/lang198x/z80-asm/compare/lang198x-z80-asm-v0.2.5...lang198x-z80-asm-v0.2.6) - 2026-11-05
+
+### Fixed
+
+- never read an instruction or directive with a colon as a label
+- keep macro expansion linear when a line has many lexer errors
+
 ## [0.2.5](https://github.com/lang198x/z80-asm/compare/lang198x-z80-asm-v0.2.4...lang198x-z80-asm-v0.2.5) - 2026-10-26
 
 A formatter for PasmoNext source, `format(text, profile)`. It never adds,
