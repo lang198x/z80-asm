@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.6](https://github.com/lang198x/z80-asm/compare/lang198x-z80-asm-v0.2.5...lang198x-z80-asm-v0.2.6) - 2026-11-05
 
+Two fixes found by fuzzing and by Asm198x's pattern-library measurements.
+An instruction or directive followed by a colon, such as `halt:`, is now the
+statement and an error at the colon, as in PasmoNext 0.1.3, instead of a
+label that silently assembled nothing. `ret:`, which PasmoNext assembles only
+because its `ret` ignores any one word after it, is rejected with the rest.
+Expansion no longer slows quadratically when one line carries many lexer
+errors, which made long self-calling macros time out.
+
 ### Fixed
 
 - never read an instruction or directive with a colon as a label
