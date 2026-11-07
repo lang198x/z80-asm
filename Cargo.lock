@@ -169,15 +169,15 @@ dependencies = [
 
 [[package]]
 name = "isa198x"
-version = "0.1.7"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fd199905f9c1a1b9e73958648740d63597dad82ed291123ac995a9c6f30cabe"
+checksum = "331e786259043ed1af59cc66ea1efd941879b8781fb8f0f90234dd8918224b6b"
 
 [[package]]
 name = "lang198x-syntax"
-version = "0.1.2"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c225ca928528a659aeecde8a98b005d57e60cda1442c93dd4884880b6d92d3a"
+checksum = "5780994ca02456eaf367db1ad2b150715f2cfbf8f33bd43c627daf0ebe8f3be4"
 
 [[package]]
 name = "lang198x-z80-asm"
